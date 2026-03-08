@@ -15,6 +15,19 @@ const metricEntryRepo = require('./repositories/metricEntryRepo.js')
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
 
+const rateLimit = {}
+
+
+bot.use((ctx, next) => {
+    const id = ctx.from.id
+    const now = Date.now()
+    if (rateLimit[id] && now - rateLimit[id] < 1000) {
+        return ctx.reply('⏳ Slow down!')
+    }
+    rateLimit[id] = now
+    return next()
+})
+
 // ─── Session Store ────────────────────────────────────────────────────────────
 
 const sessions = {}
