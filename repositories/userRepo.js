@@ -9,6 +9,13 @@ function createUser(telegramId, username) {
     stmt.run(telegramId, username)
 }
 
+function getAllUsers() {
+    const stmt = db.prepare(`
+        SELECT * FROM users
+        `)
+    return stmt.all()
+}
+
 function findByTelegramId(telegramId) {
     const stmt = db.prepare(`
         SELECT * FROM users WHERE telegram_id = ?
@@ -19,5 +26,6 @@ function findByTelegramId(telegramId) {
 
 module.exports = {
     createUser,
-    findByTelegramId
+    findByTelegramId,
+    getAllUsers
 }

@@ -6,6 +6,8 @@ const { message } = require('telegraf/filters')
 
 const { calcStreak, safe, logError } = require('./utils.js')
 
+const cron = require('node-cron')
+
 const userRepo = require('./repositories/userRepo.js')
 const habitRepo = require('./repositories/habitRepo.js')
 const habitEntryRepo = require('./repositories/habitEntryRepo.js')
@@ -113,9 +115,13 @@ function buildJournalButtons(entries, actionPrefix, backAction = 'JOURNAL_MENU')
     return Markup.inlineKeyboard(rows)
 }
 
+
+
 function buildStatsText(userId) {
     const habits = habitRepo.getUserHabits(userId)
     const metrics = metricRepo.getUserMetrics(userId)
+
+
 
     if (habits.length === 0 && metrics.length === 0) {
         return '📊 No data yet. Start by adding habits or metrics!'
@@ -178,7 +184,7 @@ bot.command('help', (ctx) => {
         `📖 *Commands:*\n` +
         `/start — Open main menu\n` +
         `/help — Show this message\n\n` +
-        `/cancel - Command to clear session from anywhere` +
+        `/cancel — Clear session from anywhere\n\n` +
         `*Habits:*\n` +
         `/addhabit <name> — Add a new habit\n` +
         `/track <name> — Mark a habit as done today\n` +
@@ -256,6 +262,7 @@ bot.command('cancel', (ctx) => {
     clearSession(ctx.from.id)
     showMainMenu(ctx, '❌ Cancelled.')
 })
+
 // ─── Main Menu ────────────────────────────────────────────────────────────────
 
 bot.action('MAIN_MENU', (ctx) => {
@@ -749,8 +756,23 @@ bot.on(message('text'), (ctx) => {
     }
 })
 
-// ─── Launch ───────────────────────────────────────────────────────────────────
+// ─── Schedule ───────────────────────────────────────────────────────────────────
 
+cron.schedule('*0 9 * * 0', () => {
+    console.log('cron fired')
+    const users = userRepo.getAllUsers()
+
+    for (const user of users) {
+        try {
+            const text = `📅 *Weekly Summary*\n\n` + buildStatsText(user.id)
+            bot.telegram.sendMessage(user.telegram_id, text, { parse_mode: 'Markdown' })
+        } catch (e) {
+            logError(e, `weekly_summary:${user.telegram_id}`)
+        }
+    }
+})
+
+// ─── Launch ───────────────────────────────────────────────────────────────────
 bot.launch()
 console.log('Bot is running...')
 
