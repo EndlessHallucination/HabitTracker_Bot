@@ -38,10 +38,50 @@ function findHabitByName(userId, name) {
     return stmt.get(userId, name)
 }
 
+function setHabitReminder(habitId, time) {
+    const stmt = db.prepare(`
+        UPDATE habits 
+        SET reminder_time = ? 
+        WHERE id = ?
+    `)
+
+    return stmt.run(time, habitId)
+}
+
+function removeHabitReminder(habitId) {
+    const stmt = db.prepare(`
+        UPDATE habits 
+        SET reminder_time = NULL 
+        WHERE id = ?
+    `)
+
+    return stmt.run(habitId)
+}
+
+function getHabitsWithReminders() {
+    const stmt = db.prepare(`
+        SELECT h.*, u.telegram_id
+        FROM habits h
+        JOIN users u ON h.user_id = u.id
+        WHERE h.reminder_time IS NOT NULL
+    `)
+
+    return stmt.all()
+}
+
+function findHabitById(habitId) {
+    const stmt = db.prepare(`SELECT * FROM habits WHERE id = ?`)
+    return stmt.get(habitId)
+}
+
 module.exports = {
     createHabit,
     deleteHabit,
     renameHabit,
     getUserHabits,
-    findHabitByName
+    findHabitByName,
+    findHabitById,
+    setHabitReminder,
+    removeHabitReminder,
+    getHabitsWithReminders
 }

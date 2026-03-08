@@ -5,6 +5,7 @@ db.exec(`
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER NOT NULL UNIQUE,
         username TEXT,
+        journal_reminder_time TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS habits (
@@ -12,6 +13,7 @@ db.exec(`
         user_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
+        reminder_time TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -29,6 +31,7 @@ db.exec(`
         user_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         unit TEXT,
+        reminder_time TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE (user_id, name)

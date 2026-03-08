@@ -50,6 +50,8 @@ const mainMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('📓 Journal', 'JOURNAL_MENU')],
     [Markup.button.callback('📈 Metrics', 'METRICS_MENU')],
     [Markup.button.callback('📊 Stats', 'SHOW_STATS')],
+    [Markup.button.callback('⏰ Reminders', 'REMINDERS_MENU')],
+
 ])
 
 const backToMainKeyboard = Markup.inlineKeyboard([
@@ -77,6 +79,11 @@ const metricsMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✏️ Rename Metric', 'RENAME_METRIC')],
     [Markup.button.callback('🗑 Delete Metric', 'DELETE_METRIC')],
     [Markup.button.callback('📊 Metric Stats', 'METRIC_STATS')],
+    [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
+])
+
+const remindersMenuKeyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('💪 Habit Reminders', 'HABIT_REMINDERS')],
     [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
 ])
 
@@ -643,6 +650,93 @@ bot.action('METRIC_STATS', (ctx) => {
     }, 'METRIC_STATS')
 })
 
+
+// ─── Reminders Menu ───────────────────────────────────────────────────────────
+
+bot.action('REMINDERS_MENU', (ctx) => {
+    safe(ctx, () => {
+        ctx.editMessageText('⏰ Reminders — what would you like to manage?', remindersMenuKeyboard)
+    }, 'REMINDERS_MENU')
+})
+
+bot.action('HABIT_REMINDERS', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+
+        if (habits.length === 0) {
+            return ctx.editMessageText('No habits yet. Add one first!', Markup.inlineKeyboard([
+                [Markup.button.callback('➕ Add Habit', 'ADD_HABIT')],
+                [Markup.button.callback('🔙 Back', 'REMINDERS_MENU')],
+            ]))
+        }
+
+        const rows = habits.map(h => {
+            const label = h.reminder_time ? `${h.name} ⏰ ${h.reminder_time}` : h.name
+            return [Markup.button.callback(label, `HABIT_REMINDER_OPTIONS:${h.id}:${h.name}`)]
+        })
+        rows.push([Markup.button.callback('🔙 Back', 'REMINDERS_MENU')])
+
+        ctx.editMessageText('💪 Select a habit to manage its reminder:', Markup.inlineKeyboard(rows))
+    }, 'HABIT_REMINDERS')
+})
+
+bot.action(/^HABIT_REMINDER_OPTIONS:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, habitName] = ctx.match
+        const habit = habitRepo.findHabitById(parseInt(habitId))
+
+        if (habit.reminder_time) {
+            ctx.editMessageText(
+                `⏰ *${habitName}* reminder is set for *${habit.reminder_time}*\nWhat would you like to do?`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('✏️ Change', `SET_HABIT_REMINDER:${habitId}:${habitName}`)],
+                        [Markup.button.callback('🗑 Remove', `REMOVE_HABIT_REMINDER:${habitId}:${habitName}`)],
+                        [Markup.button.callback('🔙 Back', 'HABIT_REMINDERS')],
+                    ])
+                }
+            )
+        } else {
+            ctx.editMessageText(
+                `⏰ No reminder set for *${habitName}*`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('➕ Set Reminder', `SET_HABIT_REMINDER:${habitId}:${habitName}`)],
+                        [Markup.button.callback('🔙 Back', 'HABIT_REMINDERS')],
+                    ])
+                }
+            )
+        }
+    }, 'HABIT_REMINDER_OPTIONS')
+})
+
+bot.action(/^SET_HABIT_REMINDER:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, habitName] = ctx.match
+        const session = getSession(ctx.from.id)
+        session.step = 'AWAITING_HABIT_REMINDER_TIME'
+        session.data.habitId = parseInt(habitId)
+        session.data.habitName = habitName
+
+        ctx.editMessageText(
+            `⏰ Send the reminder time for *${habitName}* (e.g. 09:00):`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'HABIT_REMINDERS')]]) }
+        )
+    }, 'SET_HABIT_REMINDER')
+})
+
+bot.action(/^REMOVE_HABIT_REMINDER:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, habitName] = ctx.match
+        habitRepo.removeHabitReminder(parseInt(habitId))
+        ctx.editMessageText(
+            `✅ Reminder removed for *${habitName}*`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'HABIT_REMINDERS')]]) }
+        )
+    }, 'REMOVE_HABIT_REMINDER')
+})
+
 // ─── Text Handler (multi-step flows) ─────────────────────────────────────────
 
 bot.on(message('text'), (ctx) => {
@@ -749,6 +843,20 @@ bot.on(message('text'), (ctx) => {
             break
         }
 
+        case 'AWAITING_HABIT_REMINDER_TIME': {
+            const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
+            if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
+
+            habitRepo.setHabitReminder(session.data.habitId, text)
+            const habitName = session.data.habitName
+            clearSession(ctx.from.id)
+            ctx.reply(
+                `⏰ Reminder set for *${habitName}* at *${text}* ✅`,
+                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
+            )
+            break
+        }
+
         default: {
             showMainMenu(ctx, 'Use the menu below to get started 👇')
             break
@@ -758,8 +866,7 @@ bot.on(message('text'), (ctx) => {
 
 // ─── Schedule ───────────────────────────────────────────────────────────────────
 
-cron.schedule('*0 9 * * 0', () => {
-    console.log('cron fired')
+cron.schedule('0 9 * * 0', () => {
     const users = userRepo.getAllUsers()
 
     for (const user of users) {
@@ -768,6 +875,26 @@ cron.schedule('*0 9 * * 0', () => {
             bot.telegram.sendMessage(user.telegram_id, text, { parse_mode: 'Markdown' })
         } catch (e) {
             logError(e, `weekly_summary:${user.telegram_id}`)
+        }
+    }
+})
+
+cron.schedule('* * * * *', () => {
+
+    const now = new Date().toTimeString().slice(0, 5)
+    const habits = habitRepo.getHabitsWithReminders()
+
+    for (const habit of habits) {
+        if (habit.reminder_time === now) {
+            try {
+                bot.telegram.sendMessage(
+                    habit.telegram_id,
+                    `⏰ Reminder: don't forget to track *${habit.name}* today!`,
+                    { parse_mode: 'Markdown' }
+                )
+            } catch (e) {
+                logError(e, `habit_reminder:${habit.id}`)
+            }
         }
     }
 })
