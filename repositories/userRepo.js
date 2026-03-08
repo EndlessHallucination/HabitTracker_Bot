@@ -24,8 +24,38 @@ function findByTelegramId(telegramId) {
     return stmt.get(telegramId)
 }
 
+function setJournalReminder(userId, time) {
+    const stmt = db.prepare(`
+        UPDATE users
+        SET journal_reminder_time = ? 
+        WHERE id = ?
+    `)
+
+    return stmt.run(time, userId)
+}
+
+function removeJournalReminder(userId) {
+    const stmt = db.prepare(`
+        UPDATE users 
+        SET journal_reminder_time = NULL
+        WHERE id = ?
+    `)
+    return stmt.run(userId)
+}
+
+function getUsersWithJournalReminder() {
+    const stmt = db.prepare(`
+        SELECT * FROM users
+        WHERE journal_reminder_time IS NOT NULL
+    `)
+    return stmt.all()
+}
+
 module.exports = {
     createUser,
     findByTelegramId,
-    getAllUsers
+    getAllUsers,
+    setJournalReminder,
+    removeJournalReminder,
+    getUsersWithJournalReminder
 }

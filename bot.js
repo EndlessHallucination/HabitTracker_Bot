@@ -84,6 +84,8 @@ const metricsMenuKeyboard = Markup.inlineKeyboard([
 
 const remindersMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💪 Habit Reminders', 'HABIT_REMINDERS')],
+    [Markup.button.callback('📈 Metric Reminders', 'METRIC_REMINDERS')],
+    [Markup.button.callback('📓 Journal Reminder', 'JOURNAL_REMINDER')],
     [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
 ])
 
@@ -659,6 +661,9 @@ bot.action('REMINDERS_MENU', (ctx) => {
     }, 'REMINDERS_MENU')
 })
 
+
+// ─── Habit reminders ───────────────────────────────────────────────────────────
+
 bot.action('HABIT_REMINDERS', (ctx) => {
     safe(ctx, () => {
         const user = userRepo.findByTelegramId(ctx.from.id)
@@ -737,6 +742,141 @@ bot.action(/^REMOVE_HABIT_REMINDER:(\d+):(.+)$/, (ctx) => {
     }, 'REMOVE_HABIT_REMINDER')
 })
 
+// ─── Metric reminders ───────────────────────────────────────────────────────────
+
+bot.action('METRIC_REMINDERS', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const metrics = metricRepo.getUserMetrics(user.id)
+
+        if (metrics.length === 0) {
+            return ctx.editMessageText('No metrics yet. Add one first!', Markup.inlineKeyboard([
+                [Markup.button.callback('➕ Add Metric', 'ADD_METRIC')],
+                [Markup.button.callback('🔙 Back', 'REMINDERS_MENU')],
+            ]))
+        }
+
+        const rows = metrics.map(m => {
+            const label = m.reminder_time ? `${m.name} ⏰ ${m.reminder_time}` : m.name
+            return [Markup.button.callback(label, `METRIC_REMINDER_OPTIONS:${m.id}:${m.name}`)]
+        })
+        rows.push([Markup.button.callback('🔙 Back', 'REMINDERS_MENU')])
+
+        ctx.editMessageText('💪 Select a metric to manage its reminder:', Markup.inlineKeyboard(rows))
+    }, 'METRIC_REMINDERS')
+})
+
+bot.action(/^METRIC_REMINDER_OPTIONS:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName] = ctx.match
+        const metric = metricRepo.findMetricById(parseInt(metricId))
+
+        if (metric.reminder_time) {
+            ctx.editMessageText(
+                `⏰ *${metricName}* reminder is set for *${metric.reminder_time}*\nWhat would you like to do?`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('✏️ Change', `SET_METRIC_REMINDER:${metricId}:${metricName}`)],
+                        [Markup.button.callback('🗑 Remove', `REMOVE_METRIC_REMINDER:${metricId}:${metricName}`)],
+                        [Markup.button.callback('🔙 Back', 'METRIC_REMINDERS')],
+                    ])
+                }
+            )
+        } else {
+            ctx.editMessageText(
+                `⏰ No reminder set for *${metricName}*`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('➕ Set Reminder', `SET_METRIC_REMINDER:${metricId}:${metricName}`)],
+                        [Markup.button.callback('🔙 Back', 'METRIC_REMINDERS')],
+                    ])
+                }
+            )
+        }
+    }, 'METRIC_REMINDER_OPTIONS')
+})
+
+bot.action(/^SET_METRIC_REMINDER:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName] = ctx.match
+        const session = getSession(ctx.from.id)
+        session.step = 'AWAITING_METRIC_REMINDER_TIME'
+        session.data.metricId = parseInt(metricId)
+        session.data.metricName = metricName
+
+        ctx.editMessageText(
+            `⏰ Send the reminder time for *${metricName}* (e.g. 09:00):`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'METRIC_REMINDERS')]]) }
+        )
+    }, 'SET_METRIC_REMINDER')
+})
+
+bot.action(/^REMOVE_METRIC_REMINDER:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName] = ctx.match
+        metricRepo.removeMetricReminder(parseInt(metricId))
+        ctx.editMessageText(
+            `✅ Reminder removed for *${metricName}*`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'METRIC_REMINDERS')]]) }
+        )
+    }, 'REMOVE_METRIC_REMINDER')
+})
+
+// ─── Journal reminders ───────────────────────────────────────────────────────────
+
+bot.action('JOURNAL_REMINDER', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+
+        if (user.journal_reminder_time) {
+            ctx.editMessageText(
+                `⏰ Journal reminder is set for *${user.journal_reminder_time}*\nWhat would you like to do?`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('✏️ Change', 'SET_JOURNAL_REMINDER')],
+                        [Markup.button.callback('🗑 Remove', 'REMOVE_JOURNAL_REMINDER')],
+                        [Markup.button.callback('🔙 Back', 'REMINDERS_MENU')],
+                    ])
+                }
+            )
+        } else {
+            ctx.editMessageText(
+                `⏰ No journal reminder set`,
+                {
+                    parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                        [Markup.button.callback('➕ Set Reminder', 'SET_JOURNAL_REMINDER')],
+                        [Markup.button.callback('🔙 Back', 'REMINDERS_MENU')],
+                    ])
+                }
+            )
+        }
+    }, 'JOURNAL_REMINDER')
+})
+
+bot.action('SET_JOURNAL_REMINDER', (ctx) => {
+    safe(ctx, () => {
+        const session = getSession(ctx.from.id)
+        session.step = 'AWAITING_JOURNAL_REMINDER_TIME'
+
+        ctx.editMessageText(
+            `⏰ Send the reminder time for your journal (e.g. 21:00):`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'JOURNAL_REMINDER')]]) }
+        )
+    }, 'SET_JOURNAL_REMINDER')
+})
+
+
+bot.action('REMOVE_JOURNAL_REMINDER', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        userRepo.removeJournalReminder(user.id)
+        ctx.editMessageText(
+            `✅ Journal reminder removed.`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'JOURNAL_REMINDER')]]) }
+        )
+    }, 'REMOVE_JOURNAL_REMINDER')
+})
+
 // ─── Text Handler (multi-step flows) ─────────────────────────────────────────
 
 bot.on(message('text'), (ctx) => {
@@ -744,7 +884,10 @@ bot.on(message('text'), (ctx) => {
     const raw = ctx.message.text
     const text = raw.trim()
     const user = userRepo.findByTelegramId(ctx.from.id)
-
+    if (!user) {
+        clearSession(ctx.from.id)
+        return ctx.reply('Please start the bot first with /start')
+    }
     const nameSteps = ['AWAITING_HABIT_NAME', 'AWAITING_HABIT_RENAME', 'AWAITING_METRIC_NAME', 'AWAITING_METRIC_UNIT', 'AWAITING_METRIC_RENAME']
 
     if (nameSteps.includes(session.step)) {
@@ -857,6 +1000,33 @@ bot.on(message('text'), (ctx) => {
             break
         }
 
+        case 'AWAITING_METRIC_REMINDER_TIME': {
+            const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
+            if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
+
+            metricRepo.setMetricReminder(session.data.metricId, text)
+            const metricName = session.data.metricName
+            clearSession(ctx.from.id)
+            ctx.reply(
+                `⏰ Reminder set for *${metricName}* at *${text}* ✅`,
+                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
+            )
+            break
+        }
+
+        case 'AWAITING_JOURNAL_REMINDER_TIME': {
+            const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
+            if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
+
+            userRepo.setJournalReminder(user.id, text)
+            clearSession(ctx.from.id)
+            ctx.reply(
+                `⏰ Journal reminder set for *${text}* ✅`,
+                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
+            )
+            break
+        }
+
         default: {
             showMainMenu(ctx, 'Use the menu below to get started 👇')
             break
@@ -894,6 +1064,44 @@ cron.schedule('* * * * *', () => {
                 )
             } catch (e) {
                 logError(e, `habit_reminder:${habit.id}`)
+            }
+        }
+    }
+})
+
+cron.schedule('* * * * *', () => {
+    const now = new Date().toTimeString().slice(0, 5)
+    const metrics = metricRepo.getMetricsWithReminders()
+
+    for (const metric of metrics) {
+        if (metric.reminder_time === now) {
+            try {
+                bot.telegram.sendMessage(
+                    metric.telegram_id,
+                    `⏰ Reminder: don't forget to log *${metric.name}* today!`,
+                    { parse_mode: 'Markdown' }
+                )
+            } catch (e) {
+                logError(e, `metric_reminder:${metric.id}`)
+            }
+        }
+    }
+})
+
+cron.schedule('* * * * *', () => {
+    const now = new Date().toTimeString().slice(0, 5)
+    const users = userRepo.getUsersWithJournalReminder()
+
+    for (const user of users) {
+        if (user.journal_reminder_time === now) {
+            try {
+                bot.telegram.sendMessage(
+                    user.telegram_id,
+                    `⏰ Reminder: don't forget to write your journal today!`,
+                    { parse_mode: 'Markdown' }
+                )
+            } catch (e) {
+                logError(e, `journal_reminder:${user.telegram_id}`)
             }
         }
     }

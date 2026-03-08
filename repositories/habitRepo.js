@@ -70,7 +70,9 @@ function getHabitsWithReminders() {
 }
 
 function findHabitById(habitId) {
-    const stmt = db.prepare(`SELECT * FROM habits WHERE id = ?`)
+    const stmt = db.prepare(`
+        SELECT * FROM habits WHERE id = ?
+        `)
     return stmt.get(habitId)
 }
 
