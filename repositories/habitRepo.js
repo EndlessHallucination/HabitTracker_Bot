@@ -30,6 +30,13 @@ function getUserHabits(userId) {
     return stmt.all(userId)
 }
 
+function getAllHabits() {
+    const stmt = db.prepare(`
+        SELECT * FROM habits
+    `)
+    return stmt.all()
+}
+
 function findHabitByName(userId, name) {
     const stmt = db.prepare(`
         SELECT * FROM habits
@@ -81,6 +88,7 @@ module.exports = {
     deleteHabit,
     renameHabit,
     getUserHabits,
+    getAllHabits,
     findHabitByName,
     findHabitById,
     setHabitReminder,

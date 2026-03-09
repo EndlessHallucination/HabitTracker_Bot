@@ -1065,6 +1065,20 @@ bot.on(message('text'), (ctx) => {
 
 // ─── Schedule ───────────────────────────────────────────────────────────────────
 
+cron.schedule('5 0 * * *', () => {
+    const yesterday = getYesterday()
+    const habits = habitRepo.getAllHabits()
+    for (const habit of habits) {
+        try {
+            if (habit.created_at <= yesterday && !habitEntryRepo.getHabitEntrieDate(habit.id, yesterday)) {
+                habitEntryRepo.trackHabit(habit.id, yesterday, 0)
+            }
+        } catch (e) {
+            logError(e, `auto_mark_missed:${habit.id}`)
+        }
+    }
+})
+
 cron.schedule('0 9 * * 0', () => {
     const users = userRepo.getAllUsers()
 

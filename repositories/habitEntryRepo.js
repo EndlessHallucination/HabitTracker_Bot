@@ -21,7 +21,16 @@ function getHabitEntries(habitId) {
     return stmt.all(habitId)
 }
 
+function getHabitEntrieDate(habitId, date) {
+    const stmt = db.prepare(`
+        SELECT * FROM habit_entries
+        WHERE habit_id = ? AND date = ?
+     `)
+    return stmt.get(habitId, date)
+}
+
 module.exports = {
     trackHabit,
-    getHabitEntries
+    getHabitEntries,
+    getHabitEntrieDate
 }
