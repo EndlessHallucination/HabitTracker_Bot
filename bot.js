@@ -58,29 +58,52 @@ const backToMainKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')]
 ])
 
-const habitsMenuKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('➕ Add Habit', 'ADD_HABIT')],
-    [Markup.button.callback('✅ Track Habit', 'TRACK_HABIT')],
-    [Markup.button.callback('✏️ Rename Habit', 'RENAME_HABIT')],
-    [Markup.button.callback('🗑 Delete Habit', 'DELETE_HABIT')],
-    [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
-])
 
-const journalMenuKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('✍️ Write Entry', 'WRITE_JOURNAL')],
-    [Markup.button.callback('📖 View Log', 'VIEW_JOURNAL')],
-    [Markup.button.callback('🗑 Delete Entry', 'DELETE_JOURNAL')],
-    [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
-])
+function buildHabitsMenuKeyboard(userId) {
+    const habits = habitRepo.getUserHabits(userId)
+    const hasHabits = habits.length > 0
+    const rows = [
+        [Markup.button.callback('➕ Add Habit', 'ADD_HABIT')],
+    ]
+    if (hasHabits) {
+        rows.push([Markup.button.callback('✅ Track Habit', 'TRACK_HABIT')])
+        rows.push([Markup.button.callback('✏️ Rename Habit', 'RENAME_HABIT')])
+        rows.push([Markup.button.callback('🗑 Delete Habit', 'DELETE_HABIT')])
+    }
+    rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
+    return Markup.inlineKeyboard(rows)
+}
 
-const metricsMenuKeyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('➕ Add Metric', 'ADD_METRIC')],
-    [Markup.button.callback('📝 Log Metric', 'LOG_METRIC')],
-    [Markup.button.callback('✏️ Rename Metric', 'RENAME_METRIC')],
-    [Markup.button.callback('🗑 Delete Metric', 'DELETE_METRIC')],
-    [Markup.button.callback('📊 Metric Stats', 'METRIC_STATS')],
-    [Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')],
-])
+
+function buildJournalMenuKeyboard(userId) {
+    const entries = journalRepo.getAllJournalEntries(userId)
+    const hasEntries = entries.length > 0
+    const rows = [
+        [Markup.button.callback('✍️ Write Entry', 'WRITE_JOURNAL')],
+    ]
+    if (hasEntries) {
+        rows.push([Markup.button.callback('📖 View Log', 'VIEW_JOURNAL')])
+        rows.push([Markup.button.callback('🗑 Delete Entry', 'DELETE_JOURNAL')])
+    }
+    rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
+    return Markup.inlineKeyboard(rows)
+}
+
+function buildMetricsMenuKeyboard(userId) {
+    const metrics = metricRepo.getUserMetrics(userId)
+    const hasMetrics = metrics.length > 0
+    const rows = [
+        [Markup.button.callback('➕ Add Metric', 'ADD_METRIC')],
+    ]
+    if (hasMetrics) {
+        rows.push([Markup.button.callback('📝 Log Metric', 'LOG_METRIC')])
+        rows.push([Markup.button.callback('✏️ Rename Metric', 'RENAME_METRIC')])
+        rows.push([Markup.button.callback('🗑 Delete Metric', 'DELETE_METRIC')])
+        rows.push([Markup.button.callback('📊 Metric Stats', 'METRIC_STATS')])
+    }
+    rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
+    return Markup.inlineKeyboard(rows)
+}
 
 const remindersMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('💪 Habit Reminders', 'HABIT_REMINDERS')],
@@ -292,9 +315,11 @@ bot.action('SHOW_STATS', (ctx) => {
 
 bot.action('HABITS_MENU', (ctx) => {
     safe(ctx, () => {
-        ctx.editMessageText('💪 Habits — what would you like to do?', habitsMenuKeyboard)
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        ctx.editMessageText('💪 Habits — what would you like to do?', buildHabitsMenuKeyboard(user.id))
     }, 'HABITS_MENU')
 })
+
 
 bot.action('ADD_HABIT', (ctx) => {
     safe(ctx, () => {
@@ -375,7 +400,7 @@ bot.action('RENAME_HABIT', (ctx) => {
         const habits = habitRepo.getUserHabits(user.id)
 
         if (habits.length === 0) {
-            return ctx.editMessageText('No habits to rename.', habitsMenuKeyboard)
+            return ctx.editMessageText('No habits to rename.', buildHabitsMenuKeyboard(user.id))
         }
 
         ctx.editMessageText('✏️ Which habit do you want to rename?', buildHabitButtons(habits, 'DO_RENAME_HABIT', 'HABITS_MENU'))
@@ -403,7 +428,7 @@ bot.action('DELETE_HABIT', (ctx) => {
         const habits = habitRepo.getUserHabits(user.id)
 
         if (habits.length === 0) {
-            return ctx.editMessageText('No habits to delete.', habitsMenuKeyboard)
+            return ctx.editMessageText('No habits to delete.', buildHabitsMenuKeyboard(user.id))
         }
 
         ctx.editMessageText('🗑 Which habit do you want to delete?', buildHabitButtons(habits, 'CONFIRM_DEL_HABIT', 'HABITS_MENU'))
@@ -428,8 +453,9 @@ bot.action(/^CONFIRM_DEL_HABIT:(\d+):(.+)$/, (ctx) => {
 bot.action(/^DO_DEL_HABIT:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, habitId, habitName] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
         habitRepo.deleteHabit(parseInt(habitId))
-        ctx.editMessageText(`🗑 *${habitName}* deleted.`, { parse_mode: 'Markdown', ...habitsMenuKeyboard })
+        ctx.editMessageText(`🗑 *${habitName}* deleted.`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(user.id) })
     }, 'DO_DEL_HABIT')
 })
 
@@ -437,7 +463,8 @@ bot.action(/^DO_DEL_HABIT:(\d+):(.+)$/, (ctx) => {
 
 bot.action('JOURNAL_MENU', (ctx) => {
     safe(ctx, () => {
-        ctx.editMessageText('📓 Journal — what would you like to do?', journalMenuKeyboard)
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        ctx.editMessageText('📓 Journal — what would you like to do?', buildJournalMenuKeyboard(user.id))
     }, 'JOURNAL_MENU')
 })
 
@@ -457,7 +484,7 @@ bot.action('JOURNAL_SKIP_BEST_MOMENT', (ctx) => {
         const user = userRepo.findByTelegramId(ctx.from.id)
         journalRepo.upsertJournalEntry(user.id, getToday(), session.data.note, null)
         clearSession(ctx.from.id)
-        ctx.editMessageText('Journal saved 📓', journalMenuKeyboard)
+        ctx.editMessageText('Journal saved 📓', buildJournalMenuKeyboard(user.id))
     }, 'JOURNAL_SKIP_BEST_MOMENT')
 })
 
@@ -480,7 +507,7 @@ bot.action('DELETE_JOURNAL', (ctx) => {
         const entries = journalRepo.getAllJournalEntries(user.id)
 
         if (entries.length === 0) {
-            return ctx.editMessageText('No journal entries to delete.', journalMenuKeyboard)
+            return ctx.editMessageText('No journal entries to delete.', buildJournalMenuKeyboard(user.id))
         }
 
         ctx.editMessageText('🗑 Which entry do you want to delete?', buildJournalButtons(entries.slice(0, 10), 'CONFIRM_DEL_JOURNAL'))
@@ -507,7 +534,7 @@ bot.action(/^DO_DEL_JOURNAL:(.+)$/, (ctx) => {
         const [, date] = ctx.match
         const user = userRepo.findByTelegramId(ctx.from.id)
         journalRepo.deleteJournalEntry(user.id, date)
-        ctx.editMessageText(`🗑 Entry from *${date}* deleted.`, { parse_mode: 'Markdown', ...journalMenuKeyboard })
+        ctx.editMessageText(`🗑 Entry from *${date}* deleted.`, { parse_mode: 'Markdown', ...buildJournalMenuKeyboard(user.id) })
     }, 'DO_DEL_JOURNAL')
 })
 
@@ -515,7 +542,8 @@ bot.action(/^DO_DEL_JOURNAL:(.+)$/, (ctx) => {
 
 bot.action('METRICS_MENU', (ctx) => {
     safe(ctx, () => {
-        ctx.editMessageText('📈 Metrics — what would you like to do?', metricsMenuKeyboard)
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        ctx.editMessageText('📈 Metrics — what would you like to do?', buildMetricsMenuKeyboard(user.id))
     }, 'METRICS_MENU')
 })
 
@@ -566,7 +594,7 @@ bot.action('RENAME_METRIC', (ctx) => {
         const metrics = metricRepo.getUserMetrics(user.id)
 
         if (metrics.length === 0) {
-            return ctx.editMessageText('No metrics to rename.', metricsMenuKeyboard)
+            return ctx.editMessageText('No metrics to rename.', buildMetricsMenuKeyboard(user.id))
         }
 
         ctx.editMessageText('✏️ Which metric do you want to rename?', buildMetricButtons(metrics, 'DO_RENAME_METRIC'))
@@ -594,7 +622,7 @@ bot.action('DELETE_METRIC', (ctx) => {
         const metrics = metricRepo.getUserMetrics(user.id)
 
         if (metrics.length === 0) {
-            return ctx.editMessageText('No metrics to delete.', metricsMenuKeyboard)
+            return ctx.editMessageText('No metrics to delete.', buildMetricsMenuKeyboard(user.id))
         }
 
         ctx.editMessageText('🗑 Which metric do you want to delete?', buildMetricButtons(metrics, 'CONFIRM_DEL_METRIC'))
@@ -619,8 +647,9 @@ bot.action(/^CONFIRM_DEL_METRIC:(\d+):(.+)$/, (ctx) => {
 bot.action(/^DO_DEL_METRIC:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, metricId, metricName] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
         metricRepo.deleteMetric(parseInt(metricId))
-        ctx.editMessageText(`🗑 *${metricName}* deleted.`, { parse_mode: 'Markdown', ...metricsMenuKeyboard })
+        ctx.editMessageText(`🗑 *${metricName}* deleted.`, { parse_mode: 'Markdown', ...buildMetricsMenuKeyboard(user.id) })
     }, 'DO_DEL_METRIC')
 })
 
@@ -907,7 +936,7 @@ bot.on(message('text'), (ctx) => {
             }
             habitRepo.createHabit(user.id, finalText)
             clearSession(ctx.from.id)
-            ctx.reply(`Habit *${finalText}* added ✅`, { parse_mode: 'Markdown', ...habitsMenuKeyboard })
+            ctx.reply(`Habit *${finalText}* added ✅`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(user.id) })
             break
         }
 
@@ -918,7 +947,7 @@ bot.on(message('text'), (ctx) => {
             const oldHabitName = session.data.habitName
             habitRepo.renameHabit(session.data.habitId, finalText)
             clearSession(ctx.from.id)
-            ctx.reply(`✏️ Renamed *${oldHabitName}* → *${finalText}* ✅`, { parse_mode: 'Markdown', ...habitsMenuKeyboard })
+            ctx.reply(`✏️ Renamed *${oldHabitName}* → *${finalText}* ✅`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(user.id) })
             break
         }
 
@@ -935,7 +964,7 @@ bot.on(message('text'), (ctx) => {
         case 'AWAITING_JOURNAL_BEST_MOMENT': {
             journalRepo.upsertJournalEntry(user.id, getToday(), session.data.note, text)
             clearSession(ctx.from.id)
-            ctx.reply('Journal saved 📓', journalMenuKeyboard)
+            ctx.reply('Journal saved 📓', buildJournalMenuKeyboard(user.id))
             break
         }
 
@@ -956,7 +985,7 @@ bot.on(message('text'), (ctx) => {
             metricRepo.createMetric(user.id, session.data.metricName, finalText)
             const metricName = session.data.metricName
             clearSession(ctx.from.id)
-            ctx.reply(`Metric *${metricName}* (${finalText}) created ✅`, { parse_mode: 'Markdown', ...metricsMenuKeyboard })
+            ctx.reply(`Metric *${metricName}* (${finalText}) created ✅`, { parse_mode: 'Markdown', ...buildMetricsMenuKeyboard(user.id) })
             break
         }
 
@@ -970,7 +999,7 @@ bot.on(message('text'), (ctx) => {
             clearSession(ctx.from.id)
             ctx.reply(
                 `Logged *${value} ${metric?.unit || ''}* for ${loggedMetricName} ✅`,
-                { parse_mode: 'Markdown', ...metricsMenuKeyboard }
+                { parse_mode: 'Markdown', ...buildMetricsMenuKeyboard(user.id) }
             )
             break
         }
@@ -982,7 +1011,7 @@ bot.on(message('text'), (ctx) => {
             const oldMetricName = session.data.metricName
             metricRepo.renameMetric(session.data.metricId, finalText)
             clearSession(ctx.from.id)
-            ctx.reply(`✏️ Renamed *${oldMetricName}* → *${finalText}* ✅`, { parse_mode: 'Markdown', ...metricsMenuKeyboard })
+            ctx.reply(`✏️ Renamed *${oldMetricName}* → *${finalText}* ✅`, { parse_mode: 'Markdown', ...buildMetricsMenuKeyboard(user.id) })
             break
         }
 
