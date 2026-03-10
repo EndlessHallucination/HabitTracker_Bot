@@ -1098,7 +1098,7 @@ cron.schedule('* * * * *', () => {
     const habits = habitRepo.getHabitsWithReminders()
 
     for (const habit of habits) {
-        if (habit.reminder_time === now) {
+        if (habit.reminder_time === now && !habitEntryRepo.getHabitEntrieDate(habit.id, getToday())) {
             try {
                 bot.telegram.sendMessage(
                     habit.telegram_id,
@@ -1116,7 +1116,7 @@ cron.schedule('* * * * *', () => {
     const now = new Date().toTimeString().slice(0, 5)
     const metrics = metricRepo.getMetricsWithReminders()
 
-    for (const metric of metrics) {
+    for (const metric of metrics && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
         if (metric.reminder_time === now) {
             try {
                 bot.telegram.sendMessage(
@@ -1136,7 +1136,7 @@ cron.schedule('* * * * *', () => {
     const users = userRepo.getUsersWithJournalReminder()
 
     for (const user of users) {
-        if (user.journal_reminder_time === now) {
+        if (user.journal_reminder_time === now && !journalRepo.getJournalByDate(user.id, getToday())) {
             try {
                 bot.telegram.sendMessage(
                     user.telegram_id,

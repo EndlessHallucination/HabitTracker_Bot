@@ -21,6 +21,14 @@ function getMetricEntries(metricId) {
     return stmt.all(metricId)
 }
 
+function getMetricEntryDate(metricId, date) {
+    const stmt = db.prepare(`
+        SELECT * FROM metric_entries
+        WHERE metric_id = ? AND entry_date = ?
+     `)
+    return stmt.get(metricId, date)
+}
+
 function getMetricStats(metricId) {
     const stmt = db.prepare(`
         SELECT 
@@ -38,5 +46,6 @@ function getMetricStats(metricId) {
 module.exports = {
     logMetric,
     getMetricEntries,
+    getMetricEntryDate,
     getMetricStats
 }

@@ -20,6 +20,7 @@ function deleteJournalEntry(userId, date) {
         `)
     return stmt.run(userId, date)
 }
+
 function getJournalByDate(userId, date) {
     const stmt = db.prepare(`
         SELECT * FROM journal_entries

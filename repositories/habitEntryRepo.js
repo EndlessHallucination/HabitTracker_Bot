@@ -24,7 +24,7 @@ function getHabitEntries(habitId) {
 function getHabitEntrieDate(habitId, date) {
     const stmt = db.prepare(`
         SELECT * FROM habit_entries
-        WHERE habit_id = ? AND date = ?
+        WHERE habit_id = ? AND entry_date  = ?
      `)
     return stmt.get(habitId, date)
 }
