@@ -100,6 +100,8 @@ function buildMetricsMenuKeyboard(userId) {
         rows.push([Markup.button.callback('✏️ Rename Metric', 'RENAME_METRIC')])
         rows.push([Markup.button.callback('🗑 Delete Metric', 'DELETE_METRIC')])
         rows.push([Markup.button.callback('📊 Metric Stats', 'METRIC_STATS')])
+        rows.push([Markup.button.callback('📋 View History', 'METRIC_HISTORY')])
+
     }
     rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
     return Markup.inlineKeyboard(rows)
@@ -121,6 +123,15 @@ function getYesterday() {
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     return yesterday.toISOString().split('T')[0]
+}
+
+function buildMetricHistoryText(metricName, unit, entries) {
+    if (!entries.length) return `No entries yet for ${metricName}`
+    let text = `📈 *${metricName} (${unit}) — Last ${entries.length} entries:*\n\n`
+    entries.forEach(e => {
+        text += `📅 ${e.entry_date}: *${e.value} ${unit}*\n`
+    })
+    return text
 }
 
 function buildHabitButtons(habits, actionPrefix, backAction = 'HABITS_MENU') {
@@ -182,6 +193,8 @@ function buildStatsText(userId) {
 
     return text
 }
+
+
 
 function buildJournalLogText(entries) {
     if (entries.length === 0) return '📓 No journal entries yet.'
@@ -350,6 +363,23 @@ bot.action('TRACK_HABIT', (ctx) => {
 bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, habitId, habitName] = ctx.match
+        const today = getToday()
+        const existing = habitEntryRepo.getHabitEntrieDate(parseInt(habitId), today)
+
+        if (existing) {
+            const statusLabel = existing.completed === 1 ? '✅ Done' : '❌ Not Done'
+            return ctx.editMessageText(
+                `*${habitName}* already tracked today as *${statusLabel}*`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Undo', `UNDO_TRACK_HABIT:${habitId}:${today}`)],
+                        [Markup.button.callback('🔙 Back', 'TRACK_HABIT')],
+                    ])
+                }
+            )
+        }
+
         ctx.editMessageText(
             `Did you complete *${habitName}*?`,
             {
@@ -365,6 +395,8 @@ bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
         )
     }, 'DO_TRACK')
 })
+
+
 
 bot.action(/^SET_HABIT:(\d+):(.+):(\d):(.+)$/, (ctx) => {
     safe(ctx, () => {
@@ -386,6 +418,7 @@ bot.action(/^SET_HABIT:(\d+):(.+):(\d):(.+)$/, (ctx) => {
                 : `❌ Marked *${habitName}* as not done ${label}.`,
             {
                 parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+                    [Markup.button.callback('↩️ Undo Track', `UNDO_TRACK_HABIT:${habitId}:${date}`)],
                     [Markup.button.callback('✅ Track Another', 'TRACK_HABIT')],
                     [Markup.button.callback('🔙 Habits Menu', 'HABITS_MENU')],
                 ])
@@ -393,6 +426,18 @@ bot.action(/^SET_HABIT:(\d+):(.+):(\d):(.+)$/, (ctx) => {
         )
     }, 'SET_HABIT')
 })
+
+bot.action(/^UNDO_TRACK_HABIT:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, date] = ctx.match
+        habitEntryRepo.deleteHabitEntry(parseInt(habitId), date)
+        const user = userRepo.findByTelegramId(ctx.from.id)
+
+        ctx.editMessageText(`Habit untracked.`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(user.id) })
+
+    }, 'UNDO_TRACK_HABIT')
+})
+
 
 bot.action('RENAME_HABIT', (ctx) => {
     safe(ctx, () => {
@@ -470,6 +515,23 @@ bot.action('JOURNAL_MENU', (ctx) => {
 
 bot.action('WRITE_JOURNAL', (ctx) => {
     safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const today = getToday()
+        const existing = journalRepo.getJournalByDate(user.id, today)
+
+        if (existing) {
+            return ctx.editMessageText(
+                `📓 Already journaled today:\n\n📝 ${existing.note}${existing.best_moment ? `\n✨ ${existing.best_moment}` : ''}`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Undo (delete entry)', `DO_DEL_JOURNAL:${today}`)],
+                        [Markup.button.callback('🔙 Back', 'JOURNAL_MENU')],
+                    ])
+                }
+            )
+        }
+
         getSession(ctx.from.id).step = 'AWAITING_JOURNAL_NOTE'
         ctx.editMessageText(
             '✍️ *Journal Entry*\nSend your note for today:',
@@ -576,16 +638,44 @@ bot.action('LOG_METRIC', (ctx) => {
 bot.action(/^SELECT_LOG_METRIC:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, metricId, metricName] = ctx.match
+        const today = getToday()
         const session = getSession(ctx.from.id)
+
         session.step = 'AWAITING_METRIC_VALUE'
         session.data.metricId = parseInt(metricId)
         session.data.metricName = metricName
+        const existing = metricEntryRepo.getMetricEntryDate(parseInt(metricId), today)
+
+        if (existing) {
+            return ctx.editMessageText(
+                `*${metricName}* already logged today: *${existing.value} ${existing.unit || ''}*`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Undo', `UNDO_LOG_METRIC:${metricId}:${metricName}:${today}`)],
+                        [Markup.button.callback('🔙 Back', 'LOG_METRIC')],
+                    ])
+                }
+            )
+        }
 
         ctx.editMessageText(
             `📝 Send the value for *${metricName}*:`,
             { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'METRICS_MENU')]]) }
         )
     }, 'SELECT_LOG_METRIC')
+})
+
+bot.action(/^UNDO_LOG_METRIC:(\d+):(.+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName, date] = ctx.match
+        metricEntryRepo.deleteMetricEntry(parseInt(metricId), date)
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        ctx.editMessageText(`↩️ Unlogged *${metricName}* for ${date}.`, {
+            parse_mode: 'Markdown',
+            ...buildMetricsMenuKeyboard(user.id)
+        })
+    }, 'UNDO_LOG_METRIC')
 })
 
 bot.action('RENAME_METRIC', (ctx) => {
@@ -681,7 +771,30 @@ bot.action('METRIC_STATS', (ctx) => {
     }, 'METRIC_STATS')
 })
 
+bot.action('METRIC_HISTORY', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const metrics = metricRepo.getUserMetrics(user.id)
+        ctx.editMessageText('📋 Which metric?', buildMetricButtons(metrics, 'SHOW_METRIC_HISTORY'))
+    }, 'METRIC_HISTORY')
+})
 
+
+bot.action(/^SHOW_METRIC_HISTORY:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName] = ctx.match
+        const metric = metricRepo.findMetricById(parseInt(metricId))
+        const entries = metricEntryRepo.getMetricHistory(parseInt(metricId), 10)
+        const text = buildMetricHistoryText(metric.name, metric.unit, entries)
+
+        ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Back', 'METRICS_MENU')]
+            ])
+        })
+    }, 'SHOW_METRIC_HISTORY')
+})
 // ─── Reminders Menu ───────────────────────────────────────────────────────────
 
 bot.action('REMINDERS_MENU', (ctx) => {
@@ -993,13 +1106,20 @@ bot.on(message('text'), (ctx) => {
             const value = parseFloat(text)
             if (isNaN(value)) return ctx.reply('⚠️ Please send a valid number.')
 
-            const metric = metricRepo.findMetricById(session.data.metricId)
-            metricEntryRepo.logMetric(session.data.metricId, getToday(), value)
+            const metricIdForUndo = session.data.metricId
             const loggedMetricName = session.data.metricName
+            const metric = metricRepo.findMetricById(metricIdForUndo)
+            metricEntryRepo.logMetric(metricIdForUndo, getToday(), value)
             clearSession(ctx.from.id)
             ctx.reply(
                 `Logged *${value} ${metric?.unit || ''}* for ${loggedMetricName} ✅`,
-                { parse_mode: 'Markdown', ...buildMetricsMenuKeyboard(user.id) }
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Undo', `UNDO_LOG_METRIC:${metricIdForUndo}:${loggedMetricName}:${getToday()}`)],
+                        [Markup.button.callback('🔙 Metrics Menu', 'METRICS_MENU')],
+                    ])
+                }
             )
             break
         }
@@ -1116,8 +1236,8 @@ cron.schedule('* * * * *', () => {
     const now = new Date().toTimeString().slice(0, 5)
     const metrics = metricRepo.getMetricsWithReminders()
 
-    for (const metric of metrics && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
-        if (metric.reminder_time === now) {
+    for (const metric of metrics) {
+        if (metric.reminder_time === now && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
             try {
                 bot.telegram.sendMessage(
                     metric.telegram_id,

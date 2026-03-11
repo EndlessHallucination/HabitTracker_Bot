@@ -76,6 +76,8 @@ function getMetricsWithReminders() {
     return stmt.all()
 }
 
+
+
 module.exports = {
     createMetric,
     deleteMetric,

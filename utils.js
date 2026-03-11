@@ -1,6 +1,7 @@
 const habitRepo = require('./repositories/habitRepo.js')
 const habitEntryRepo = require('./repositories/habitEntryRepo.js')
 const fs = require('fs')
+const { Markup } = require('telegraf')
 
 function calcStreak(entries) {
     const completed = entries.filter(e => e.completed === 1)
@@ -40,9 +41,12 @@ async function safe(ctx, fn, context = '') {
     }
 }
 
+
+
 module.exports = {
     calcStreak,
     logError,
-    safe
+    safe,
+
 }
 

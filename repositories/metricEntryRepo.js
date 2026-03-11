@@ -43,9 +43,29 @@ function getMetricStats(metricId) {
     return stmt.get(metricId)
 }
 
+function deleteMetricEntry(metricId, date) {
+    const stmt = db.prepare(`
+        DELETE FROM metric_entries
+        WHERE metric_id = ? AND entry_date = ? 
+   `)
+    return stmt.run(metricId, date)
+}
+
+function getMetricHistory(metricId, limit) {
+    const stmt = db.prepare(`
+        SELECT * FROM metric_entries
+        WHERE metric_id = ?      
+        ORDER BY entry_date DESC
+        LIMIT ?
+    `)
+    return stmt.all(metricId, limit)
+}
+
 module.exports = {
     logMetric,
     getMetricEntries,
     getMetricEntryDate,
-    getMetricStats
+    getMetricStats,
+    getMetricHistory,
+    deleteMetricEntry
 }

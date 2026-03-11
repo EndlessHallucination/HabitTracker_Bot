@@ -11,6 +11,14 @@ function trackHabit(habitId, date, completed = 1) {
     return stmt.run(habitId, date, completed)
 }
 
+function deleteHabitEntry(habitId, date) {
+    const stmt = db.prepare(`
+        DELETE FROM habit_entries
+        WHERE habit_id = ? AND entry_date = ? 
+   `)
+    return stmt.run(habitId, date)
+}
+
 function getHabitEntries(habitId) {
     const stmt = db.prepare(`
         SELECT * FROM habit_entries
@@ -31,6 +39,7 @@ function getHabitEntrieDate(habitId, date) {
 
 module.exports = {
     trackHabit,
+    deleteHabitEntry,
     getHabitEntries,
     getHabitEntrieDate
 }
