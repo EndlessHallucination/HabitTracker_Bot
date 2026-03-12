@@ -15,6 +15,17 @@ const journalRepo = require('./repositories/journalRepo.js')
 const metricRepo = require('./repositories/metricRepo.js')
 const metricEntryRepo = require('./repositories/metricEntryRepo.js')
 
+
+// ─── Env Validation ───────────────────────────────────────────────────────────
+
+const REQUIRED_ENV = ['BOT_TOKEN']
+for (const key of REQUIRED_ENV) {
+    if (!process.env[key]) {
+        console.error(`❌ Missing required env variable: ${key}`)
+        process.exit(1)
+    }
+}
+
 const bot = new Telegraf(process.env.BOT_TOKEN)
 
 const rateLimit = {}
@@ -1381,16 +1392,16 @@ bot.on(message('text'), (ctx) => {
         clearSession(ctx.from.id)
         return ctx.reply('Please start the bot first with /start')
     }
+
     const nameSteps = ['AWAITING_HABIT_NAME', 'AWAITING_HABIT_RENAME', 'AWAITING_METRIC_NAME', 'AWAITING_METRIC_UNIT', 'AWAITING_METRIC_RENAME']
 
+    let finalText = text
     if (nameSteps.includes(session.step)) {
         const sanitized = text.replace(/[^\w\s\-]/g, '').trim()
         if (!sanitized) return ctx.reply('⚠️ Name cannot be empty or contain only special characters.')
         if (sanitized.length > 50) return ctx.reply('⚠️ Name too long (max 50 chars).')
-        Object.defineProperty(ctx, '_cleanText', { value: sanitized, writable: true })
+        finalText = sanitized
     }
-
-    const finalText = ctx._cleanText || text
 
     switch (session.step) {
 
