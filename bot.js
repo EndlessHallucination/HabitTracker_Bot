@@ -50,8 +50,8 @@ const mainMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('📓 Journal', 'JOURNAL_MENU')],
     [Markup.button.callback('📈 Metrics', 'METRICS_MENU')],
     [Markup.button.callback('📊 Stats', 'SHOW_STATS')],
+    [Markup.button.callback('📅 Calendar', 'CALENDAR_TODAY')],
     [Markup.button.callback('⏰ Reminders', 'REMINDERS_MENU')],
-
 ])
 
 const backToMainKeyboard = Markup.inlineKeyboard([
@@ -82,7 +82,7 @@ function buildJournalMenuKeyboard(userId) {
         [Markup.button.callback('✍️ Write Entry', 'WRITE_JOURNAL')],
     ]
     if (hasEntries) {
-        rows.push([Markup.button.callback('📖 View Log', 'VIEW_JOURNAL')])
+        rows.push([Markup.button.callback('📖 View Log', 'VIEW_JOURNAL:0')])
         rows.push([Markup.button.callback('🗑 Delete Entry', 'DELETE_JOURNAL')])
     }
     rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
@@ -132,6 +132,91 @@ function buildMetricHistoryText(metricName, unit, entries) {
         text += `📅 ${e.entry_date}: *${e.value} ${unit}*\n`
     })
     return text
+}
+
+// ─── Calendar Helpers ─────────────────────────────────────────────────────────
+
+function buildCalendarKeyboard(userId, year, month) {
+    const habits = habitRepo.getUserHabits(userId)
+    const metrics = metricRepo.getUserMetrics(userId)
+
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const firstDayOfWeek = new Date(year, month - 1, 1).getDay()
+    // Adjust so week starts Monday (0=Mon...6=Sun)
+    const offset = (firstDayOfWeek + 6) % 7
+
+    const monthName = new Date(year, month - 1, 1).toLocaleString('default', { month: 'long' })
+    const today = getToday()
+
+    // Header row
+    const rows = []
+    rows.push([Markup.button.callback(`📅 ${monthName} ${year}`, 'NOOP')])
+    rows.push(['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => Markup.button.callback(d, 'NOOP')))
+
+    // Build day grid
+    let week = []
+    // Pad empty days before month starts
+    for (let i = 0; i < offset; i++) {
+        week.push(Markup.button.callback(' ', 'NOOP'))
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+        const isFuture = dateStr > today
+        const isToday = dateStr === today
+
+        let label = String(day)
+        if (isToday) label = `[${day}]`
+
+        if (!isFuture) {
+            // Check data existence
+            const hasJournal = !!journalRepo.getJournalByDate(userId, dateStr)
+            const habitsDone = habits.filter(h => {
+                const e = habitEntryRepo.getHabitEntrieDate(h.id, dateStr)
+                return e && e.completed === 1
+            }).length
+            const hasMetric = metrics.some(m => !!metricEntryRepo.getMetricEntryDate(m.id, dateStr))
+
+            const allDone = habits.length > 0 && habitsDone === habits.length
+            const someDone = habitsDone > 0 && habitsDone < habits.length
+
+            let indicator = ''
+            if (allDone) indicator += '✅'
+            else if (someDone) indicator += '⚠️'
+            if (hasJournal) indicator += '📝'
+            if (hasMetric) indicator += '📈'
+
+            if (indicator) label = `${day}${indicator}`
+        }
+
+        const action = isFuture ? 'NOOP' : `CAL_DAY:${dateStr}`
+        week.push(Markup.button.callback(label, action))
+
+        if (week.length === 7) {
+            rows.push(week)
+            week = []
+        }
+    }
+
+    // Pad last week
+    if (week.length > 0) {
+        while (week.length < 7) week.push(Markup.button.callback(' ', 'NOOP'))
+        rows.push(week)
+    }
+
+    // Prev / Next navigation
+    let prevYear = year, prevMonth = month - 1
+    if (prevMonth === 0) { prevMonth = 12; prevYear-- }
+    let nextYear = year, nextMonth = month + 1
+    if (nextMonth === 13) { nextMonth = 1; nextYear++ }
+
+    rows.push([
+        Markup.button.callback('◀️ Prev', `CALENDAR:${prevYear}-${String(prevMonth).padStart(2, '0')}`),
+        Markup.button.callback('Next ▶️', `CALENDAR:${nextYear}-${String(nextMonth).padStart(2, '0')}`),
+    ])
+    rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
+
+    return Markup.inlineKeyboard(rows)
 }
 
 function buildHabitButtons(habits, actionPrefix, backAction = 'HABITS_MENU') {
@@ -196,11 +281,10 @@ function buildStatsText(userId) {
 
 
 
-function buildJournalLogText(entries) {
+function buildJournalLogText(entries, page, totalPages) {
     if (entries.length === 0) return '📓 No journal entries yet.'
-
-    let text = '📓 *Last 7 Journal Entries:*\n\n'
-    entries.slice(0, 7).forEach(e => {
+    let text = `📓 *Journal Entries (page ${page + 1}/${totalPages}):*\n\n`
+    entries.forEach(e => {
         text += `📅 *${e.entry_date}*\n`
         text += `📝 ${e.note}\n`
         if (e.best_moment) text += `✨ ${e.best_moment}\n`
@@ -324,6 +408,10 @@ bot.action('SHOW_STATS', (ctx) => {
     }, 'SHOW_STATS')
 })
 
+// ─── No Operation ────────────────────────────────────────────────────────────────
+
+bot.action('NOOP', (ctx) => ctx.answerCbQuery())
+
 // ─── Habits Menu ──────────────────────────────────────────────────────────────
 
 bot.action('HABITS_MENU', (ctx) => {
@@ -395,7 +483,6 @@ bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
         )
     }, 'DO_TRACK')
 })
-
 
 
 bot.action(/^SET_HABIT:(\d+):(.+):(\d):(.+)$/, (ctx) => {
@@ -544,21 +631,34 @@ bot.action('JOURNAL_SKIP_BEST_MOMENT', (ctx) => {
     safe(ctx, () => {
         const session = getSession(ctx.from.id)
         const user = userRepo.findByTelegramId(ctx.from.id)
-        journalRepo.upsertJournalEntry(user.id, getToday(), session.data.note, null)
+        const journalDate = session.data.selectedDate || getToday()
+        journalRepo.upsertJournalEntry(user.id, journalDate, session.data.note, null)
         clearSession(ctx.from.id)
         ctx.editMessageText('Journal saved 📓', buildJournalMenuKeyboard(user.id))
     }, 'JOURNAL_SKIP_BEST_MOMENT')
 })
-
-bot.action('VIEW_JOURNAL', (ctx) => {
+bot.action(/^VIEW_JOURNAL:(\d+)$/, (ctx) => {
     safe(ctx, () => {
+        const page = parseInt(ctx.match[1])
         const user = userRepo.findByTelegramId(ctx.from.id)
         const entries = journalRepo.getAllJournalEntries(user.id)
-        const text = buildJournalLogText(entries)
+
+        const pageSize = 5
+        const totalPages = Math.ceil(entries.length / pageSize) || 1
+        const slice = entries.slice(page * pageSize, (page + 1) * pageSize)
+        const text = buildJournalLogText(slice, page, totalPages)
+
+        const navButtons = []
+        if (page > 0) navButtons.push(Markup.button.callback('⬅️ Prev', `VIEW_JOURNAL:${page - 1}`))
+        if (page < totalPages - 1) navButtons.push(Markup.button.callback('➡️ Next', `VIEW_JOURNAL:${page + 1}`))
+
+        const rows = []
+        if (navButtons.length > 0) rows.push(navButtons)
+        rows.push([Markup.button.callback('🔙 Journal Menu', 'JOURNAL_MENU')])
+
         ctx.editMessageText(text, {
-            parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-                [Markup.button.callback('🔙 Journal Menu', 'JOURNAL_MENU')],
-            ])
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(rows)
         })
     }, 'VIEW_JOURNAL')
 })
@@ -795,6 +895,257 @@ bot.action(/^SHOW_METRIC_HISTORY:(\d+):(.+)$/, (ctx) => {
         })
     }, 'SHOW_METRIC_HISTORY')
 })
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+bot.action('CALENDAR_TODAY', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const now = new Date()
+        ctx.editMessageText(
+            '📅 Calendar — tap a day to view or edit',
+            buildCalendarKeyboard(user.id, now.getFullYear(), now.getMonth() + 1)
+        )
+    }, 'CALENDAR_TODAY')
+})
+
+bot.action(/^CALENDAR:(\d{4})-(\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const year = parseInt(ctx.match[1])
+        const month = parseInt(ctx.match[2])
+        ctx.editMessageText(
+            '📅 Calendar — tap a day to view or edit',
+            buildCalendarKeyboard(user.id, year, month)
+        )
+    }, 'CALENDAR')
+})
+
+bot.action(/^CAL_DAY:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, dateStr] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+        const metrics = metricRepo.getUserMetrics(user.id)
+
+        // Build summary text
+        let text = `📅 *${dateStr}*\n\n`
+
+        if (habits.length > 0) {
+            text += `*💪 Habits:*\n`
+            habits.forEach(h => {
+                const entry = habitEntryRepo.getHabitEntrieDate(h.id, dateStr)
+                const icon = !entry ? '·' : entry.completed === 1 ? '✅' : '❌'
+                text += `${icon} ${h.name}\n`
+            })
+            text += '\n'
+        }
+
+        if (metrics.length > 0) {
+            text += `*📈 Metrics:*\n`
+            metrics.forEach(m => {
+                const entry = metricEntryRepo.getMetricEntryDate(m.id, dateStr)
+                const val = entry ? `${entry.value} ${m.unit}` : '·'
+                text += `• ${m.name}: ${val}\n`
+            })
+            text += '\n'
+        }
+
+        const journal = journalRepo.getJournalByDate(user.id, dateStr)
+        text += `*📓 Journal:*\n`
+        if (journal) {
+            text += `📝 ${journal.note}\n`
+            if (journal.best_moment) text += `✨ ${journal.best_moment}\n`
+        } else {
+            text += `· No entry\n`
+        }
+
+        // Parse YYYY-MM from dateStr for back button
+        const [y, m] = dateStr.split('-')
+
+        const rows = [
+            [Markup.button.callback('💪 Edit Habits', `CAL_EDIT_HABITS:${dateStr}`)],
+            [Markup.button.callback('📈 Log Metric', `CAL_EDIT_METRIC:${dateStr}`)],
+            [Markup.button.callback('📓 Edit Journal', `CAL_EDIT_JOURNAL:${dateStr}`)],
+            [Markup.button.callback('🔙 Back to Calendar', `CALENDAR:${y}-${m}`)],
+        ]
+
+        ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) })
+    }, 'CAL_DAY')
+})
+
+// ─── Calendar Edit — Habits ───────────────────────────────────────────────────
+
+bot.action(/^CAL_EDIT_HABITS:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, dateStr] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+
+        if (habits.length === 0) {
+            return ctx.editMessageText('No habits yet.', Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)],
+            ]))
+        }
+
+        const rows = habits.map(h => {
+            const entry = habitEntryRepo.getHabitEntrieDate(h.id, dateStr)
+            const icon = !entry ? '·' : entry.completed === 1 ? '✅' : '❌'
+            return [Markup.button.callback(`${icon} ${h.name}`, `CAL_SET_HABIT:${h.id}:${dateStr}`)]
+        })
+        rows.push([Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)])
+
+        ctx.editMessageText(
+            `💪 *Habits for ${dateStr}*\nTap to toggle:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }
+        )
+    }, 'CAL_EDIT_HABITS')
+})
+
+bot.action(/^CAL_SET_HABIT:(\d+):(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, dateStr] = ctx.match
+        const existing = habitEntryRepo.getHabitEntrieDate(parseInt(habitId), dateStr)
+
+        if (existing) {
+            // Toggle: flip completed status
+            const newStatus = existing.completed === 1 ? 0 : 1
+            habitEntryRepo.trackHabit(parseInt(habitId), dateStr, newStatus)
+        } else {
+            habitEntryRepo.trackHabit(parseInt(habitId), dateStr, 1)
+        }
+
+        // Re-render habits list for that date
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+        const rows = habits.map(h => {
+            const entry = habitEntryRepo.getHabitEntrieDate(h.id, dateStr)
+            const icon = !entry ? '·' : entry.completed === 1 ? '✅' : '❌'
+            return [Markup.button.callback(`${icon} ${h.name}`, `CAL_SET_HABIT:${h.id}:${dateStr}`)]
+        })
+        rows.push([Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)])
+
+        ctx.editMessageText(
+            `💪 *Habits for ${dateStr}*\nTap to toggle:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }
+        )
+    }, 'CAL_SET_HABIT')
+})
+
+// ─── Calendar Edit — Metric ───────────────────────────────────────────────────
+
+bot.action(/^CAL_EDIT_METRIC:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, dateStr] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const metrics = metricRepo.getUserMetrics(user.id)
+
+        if (metrics.length === 0) {
+            return ctx.editMessageText('No metrics yet.', Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)],
+            ]))
+        }
+
+        const rows = metrics.map(m =>
+            [Markup.button.callback(`${m.name} (${m.unit})`, `CAL_SEL_MET:${m.id}:${m.name}:${dateStr}`)]
+        )
+        rows.push([Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)])
+
+        ctx.editMessageText(
+            `📈 *Log Metric for ${dateStr}*\nWhich metric?`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }
+        )
+    }, 'CAL_EDIT_METRIC')
+})
+
+bot.action(/^CAL_SEL_MET:(\d+):(.+):(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName, dateStr] = ctx.match
+        const existing = metricEntryRepo.getMetricEntryDate(parseInt(metricId), dateStr)
+
+        if (existing) {
+            return ctx.editMessageText(
+                `*${metricName}* already logged on ${dateStr}: *${existing.value}*\nUndo to re-log.`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Undo', `CAL_UNDO_MET:${metricId}:${metricName}:${dateStr}`)],
+                        [Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)],
+                    ])
+                }
+            )
+        }
+
+        // Store date in session and reuse AWAITING_METRIC_VALUE
+        const session = getSession(ctx.from.id)
+        session.step = 'AWAITING_METRIC_VALUE'
+        session.data.metricId = parseInt(metricId)
+        session.data.metricName = metricName
+        session.data.selectedDate = dateStr
+
+        ctx.editMessageText(
+            `📈 Send value for *${metricName}* on ${dateStr}:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', `CAL_DAY:${dateStr}`)]]) }
+        )
+    }, 'CAL_SEL_MET')
+})
+
+bot.action(/^CAL_UNDO_MET:(\d+):(.+):(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, metricId, metricName, dateStr] = ctx.match
+        metricEntryRepo.deleteMetricEntry(parseInt(metricId), dateStr)
+        ctx.editMessageText(
+            `↩️ Unlogged *${metricName}* for ${dateStr}.`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)]]) }
+        )
+    }, 'CAL_UNDO_MET')
+})
+
+// ─── Calendar Edit — Journal ──────────────────────────────────────────────────
+
+bot.action(/^CAL_EDIT_JOURNAL:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, dateStr] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const existing = journalRepo.getJournalByDate(user.id, dateStr)
+
+        if (existing) {
+            return ctx.editMessageText(
+                `📓 *Journal for ${dateStr}:*\n\n📝 ${existing.note}${existing.best_moment ? `\n✨ ${existing.best_moment}` : ''}`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('↩️ Delete Entry', `CAL_DEL_JOURNAL:${dateStr}`)],
+                        [Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)],
+                    ])
+                }
+            )
+        }
+
+        // Reuse journal flow but store selected date
+        const session = getSession(ctx.from.id)
+        session.step = 'AWAITING_JOURNAL_NOTE'
+        session.data.selectedDate = dateStr
+
+        ctx.editMessageText(
+            `✍️ *Journal for ${dateStr}*\nSend your note:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', `CAL_DAY:${dateStr}`)]]) }
+        )
+    }, 'CAL_EDIT_JOURNAL')
+})
+
+bot.action(/^CAL_DEL_JOURNAL:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
+    safe(ctx, () => {
+        const [, dateStr] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        journalRepo.deleteJournalEntry(user.id, dateStr)
+        ctx.editMessageText(
+            `🗑 Journal entry for ${dateStr} deleted.`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', `CAL_DAY:${dateStr}`)]]) }
+        )
+    }, 'CAL_DEL_JOURNAL')
+})
+
 // ─── Reminders Menu ───────────────────────────────────────────────────────────
 
 bot.action('REMINDERS_MENU', (ctx) => {
@@ -1075,7 +1426,8 @@ bot.on(message('text'), (ctx) => {
         }
 
         case 'AWAITING_JOURNAL_BEST_MOMENT': {
-            journalRepo.upsertJournalEntry(user.id, getToday(), session.data.note, text)
+            const journalDate = session.data.selectedDate || getToday()
+            journalRepo.upsertJournalEntry(user.id, journalDate, session.data.note, text)
             clearSession(ctx.from.id)
             ctx.reply('Journal saved 📓', buildJournalMenuKeyboard(user.id))
             break
@@ -1108,15 +1460,16 @@ bot.on(message('text'), (ctx) => {
 
             const metricIdForUndo = session.data.metricId
             const loggedMetricName = session.data.metricName
+            const logDate = session.data.selectedDate || getToday()  // ← change
             const metric = metricRepo.findMetricById(metricIdForUndo)
-            metricEntryRepo.logMetric(metricIdForUndo, getToday(), value)
+            metricEntryRepo.logMetric(metricIdForUndo, logDate, value)
             clearSession(ctx.from.id)
             ctx.reply(
-                `Logged *${value} ${metric?.unit || ''}* for ${loggedMetricName} ✅`,
+                `Logged *${value} ${metric?.unit || ''}* for ${loggedMetricName} on ${logDate} ✅`,
                 {
                     parse_mode: 'Markdown',
                     ...Markup.inlineKeyboard([
-                        [Markup.button.callback('↩️ Undo', `UNDO_LOG_METRIC:${metricIdForUndo}:${loggedMetricName}:${getToday()}`)],
+                        [Markup.button.callback('↩️ Undo', `UNDO_LOG_METRIC:${metricIdForUndo}:${loggedMetricName}:${logDate}`)],
                         [Markup.button.callback('🔙 Metrics Menu', 'METRICS_MENU')],
                     ])
                 }
