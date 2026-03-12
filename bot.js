@@ -28,8 +28,12 @@ for (const key of REQUIRED_ENV) {
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
 
+
+const sentReminders = new Set()
+
 const rateLimit = {}
 
+// Clear stale rate limit entries every 5 minutes
 setInterval(() => {
     const now = Date.now()
     for (const id in rateLimit) {
@@ -39,14 +43,22 @@ setInterval(() => {
     }
 }, 5 * 60 * 1000)
 
+// Clear sent reminders every minute
+setInterval(() => sentReminders.clear(), 60 * 1000)
+
 
 bot.use((ctx, next) => {
+    if (!ctx.from) return next()
+
     const id = ctx.from.id
     const now = Date.now()
+
     if (rateLimit[id] && now - rateLimit[id] < 1000) {
         return ctx.reply('⏳ Slow down!')
     }
+
     rateLimit[id] = now
+    userRepo.createUser(id, ctx.from.first_name)
     return next()
 })
 
@@ -320,7 +332,6 @@ function showMainMenu(ctx, text = '🏠 Main Menu') {
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 bot.start((ctx) => {
-    userRepo.createUser(ctx.from.id, ctx.from.first_name)
     clearSession(ctx.from.id)
     ctx.reply(
         `Hey ${ctx.from.first_name}! 👋 I'm your personal tracker bot.\nChoose an option below:`,
@@ -1397,10 +1408,7 @@ bot.on(message('text'), (ctx) => {
     const raw = ctx.message.text
     const text = raw.trim()
     const user = userRepo.findByTelegramId(ctx.from.id)
-    if (!user) {
-        clearSession(ctx.from.id)
-        return ctx.reply('Please start the bot first with /start')
-    }
+    if (!user) return
 
     const nameSteps = ['AWAITING_HABIT_NAME', 'AWAITING_HABIT_RENAME', 'AWAITING_METRIC_NAME', 'AWAITING_METRIC_UNIT', 'AWAITING_METRIC_RENAME']
 
@@ -1586,12 +1594,13 @@ cron.schedule('0 9 * * 0', () => {
 })
 
 cron.schedule('* * * * *', () => {
-
     const now = new Date().toTimeString().slice(0, 5)
     const habits = habitRepo.getHabitsWithReminders()
 
     for (const habit of habits) {
-        if (habit.reminder_time === now && !habitEntryRepo.getHabitEntrieDate(habit.id, getToday())) {
+        const key = `habit:${habit.id}:${now}`
+        if (habit.reminder_time === now && !sentReminders.has(key) && !habitEntryRepo.getHabitEntrieDate(habit.id, getToday())) {
+            sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(
                     habit.telegram_id,
@@ -1610,7 +1619,9 @@ cron.schedule('* * * * *', () => {
     const metrics = metricRepo.getMetricsWithReminders()
 
     for (const metric of metrics) {
-        if (metric.reminder_time === now && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
+        const key = `metric:${metric.id}:${now}`
+        if (metric.reminder_time === now && !sentReminders.has(key) && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
+            sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(
                     metric.telegram_id,
@@ -1629,7 +1640,9 @@ cron.schedule('* * * * *', () => {
     const users = userRepo.getUsersWithJournalReminder()
 
     for (const user of users) {
-        if (user.journal_reminder_time === now && !journalRepo.getJournalByDate(user.id, getToday())) {
+        const key = `journal:${user.id}:${now}`
+        if (user.journal_reminder_time === now && !sentReminders.has(key) && !journalRepo.getJournalByDate(user.id, getToday())) {
+            sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(
                     user.telegram_id,

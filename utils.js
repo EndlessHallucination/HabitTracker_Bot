@@ -36,6 +36,18 @@ async function safe(ctx, fn, context = '') {
     try {
         await fn()
     } catch (e) {
+        const ignoredErrors = [
+            'message is not modified',
+            'message to edit not found',
+            'query is too old',
+        ]
+
+        const isIgnored = ignoredErrors.some(msg => e.message?.includes(msg))
+
+        if (isIgnored) {
+            return ctx.answerCbQuery().catch(() => { })
+        }
+
         logError(e, context)
         ctx.reply('⚠️ Something went wrong. Try again.')
     }
