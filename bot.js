@@ -30,6 +30,15 @@ const bot = new Telegraf(process.env.BOT_TOKEN)
 
 const rateLimit = {}
 
+setInterval(() => {
+    const now = Date.now()
+    for (const id in rateLimit) {
+        if (now - rateLimit[id] > 60_000) {
+            delete rateLimit[id]
+        }
+    }
+}, 5 * 60 * 1000)
+
 
 bot.use((ctx, next) => {
     const id = ctx.from.id
