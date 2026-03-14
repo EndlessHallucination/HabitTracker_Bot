@@ -37,9 +37,20 @@ function getHabitEntrieDate(habitId, date) {
     return stmt.get(habitId, date)
 }
 
+function exportUserHabitEntries(userId) {
+    return db.prepare(`
+        SELECT he.entry_date, h.name, he.completed
+        FROM habit_entries he
+        JOIN habits h ON h.id = he.habit_id
+        WHERE h.user_id = ?
+        ORDER BY he.entry_date DESC
+    `).all(userId)
+}
+
 module.exports = {
     trackHabit,
     deleteHabitEntry,
     getHabitEntries,
-    getHabitEntrieDate
+    getHabitEntrieDate,
+    exportUserHabitEntries
 }

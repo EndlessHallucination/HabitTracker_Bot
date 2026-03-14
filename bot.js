@@ -15,7 +15,6 @@ const journalRepo = require('./repositories/journalRepo.js')
 const metricRepo = require('./repositories/metricRepo.js')
 const metricEntryRepo = require('./repositories/metricEntryRepo.js')
 
-
 // ─── Env Validation ───────────────────────────────────────────────────────────
 
 const REQUIRED_ENV = ['BOT_TOKEN']
@@ -27,7 +26,6 @@ for (const key of REQUIRED_ENV) {
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
-
 
 const sentReminders = new Set()
 
@@ -45,7 +43,6 @@ setInterval(() => {
 
 // Clear sent reminders every minute
 setInterval(() => sentReminders.clear(), 60 * 1000)
-
 
 bot.use((ctx, next) => {
     if (!ctx.from) return next()
@@ -84,6 +81,9 @@ const mainMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('📊 Stats', 'SHOW_STATS')],
     [Markup.button.callback('📅 Calendar', 'CALENDAR_TODAY')],
     [Markup.button.callback('⏰ Reminders', 'REMINDERS_MENU')],
+    [Markup.button.callback('🌍 Set Timezone', 'SET_TIMEZONE')],
+    [Markup.button.callback('📤 Export Data', 'EXPORT_DATA')],
+
 ])
 
 const backToMainKeyboard = Markup.inlineKeyboard([
@@ -105,7 +105,6 @@ function buildHabitsMenuKeyboard(userId) {
     rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
     return Markup.inlineKeyboard(rows)
 }
-
 
 function buildJournalMenuKeyboard(userId) {
     const entries = journalRepo.getAllJournalEntries(userId)
@@ -133,7 +132,6 @@ function buildMetricsMenuKeyboard(userId) {
         rows.push([Markup.button.callback('🗑 Delete Metric', 'DELETE_METRIC')])
         rows.push([Markup.button.callback('📊 Metric Stats', 'METRIC_STATS')])
         rows.push([Markup.button.callback('📋 View History', 'METRIC_HISTORY')])
-
     }
     rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
     return Markup.inlineKeyboard(rows)
@@ -148,13 +146,21 @@ const remindersMenuKeyboard = Markup.inlineKeyboard([
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getToday() {
-    return new Date().toISOString().split('T')[0]
+// en-CA locale gives YYYY-MM-DD format natively
+function getToday(timezone = 'UTC') {
+    return new Date().toLocaleDateString('en-CA', { timeZone: timezone })
 }
-function getYesterday() {
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    return yesterday.toISOString().split('T')[0]
+
+function getYesterday(timezone = 'UTC') {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return d.toLocaleDateString('en-CA', { timeZone: timezone })
+}
+
+// Convenience: get timezone for a telegram user, falls back to UTC
+function getUserTimezone(telegramId) {
+    const user = userRepo.findByTelegramId(telegramId)
+    return user?.timezone || 'UTC'
 }
 
 function buildMetricHistoryText(metricName, unit, entries) {
@@ -168,26 +174,22 @@ function buildMetricHistoryText(metricName, unit, entries) {
 
 // ─── Calendar Helpers ─────────────────────────────────────────────────────────
 
-function buildCalendarKeyboard(userId, year, month) {
+function buildCalendarKeyboard(userId, year, month, timezone = 'UTC') {
     const habits = habitRepo.getUserHabits(userId)
     const metrics = metricRepo.getUserMetrics(userId)
 
     const daysInMonth = new Date(year, month, 0).getDate()
     const firstDayOfWeek = new Date(year, month - 1, 1).getDay()
-    // Adjust so week starts Monday (0=Mon...6=Sun)
     const offset = (firstDayOfWeek + 6) % 7
 
     const monthName = new Date(year, month - 1, 1).toLocaleString('default', { month: 'long' })
-    const today = getToday()
+    const today = getToday(timezone)
 
-    // Header row
     const rows = []
     rows.push([Markup.button.callback(`📅 ${monthName} ${year}`, 'NOOP')])
     rows.push(['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => Markup.button.callback(d, 'NOOP')))
 
-    // Build day grid
     let week = []
-    // Pad empty days before month starts
     for (let i = 0; i < offset; i++) {
         week.push(Markup.button.callback(' ', 'NOOP'))
     }
@@ -201,7 +203,6 @@ function buildCalendarKeyboard(userId, year, month) {
         if (isToday) label = `[${day}]`
 
         if (!isFuture) {
-            // Check data existence
             const hasJournal = !!journalRepo.getJournalByDate(userId, dateStr)
             const habitsDone = habits.filter(h => {
                 const e = habitEntryRepo.getHabitEntrieDate(h.id, dateStr)
@@ -230,13 +231,11 @@ function buildCalendarKeyboard(userId, year, month) {
         }
     }
 
-    // Pad last week
     if (week.length > 0) {
         while (week.length < 7) week.push(Markup.button.callback(' ', 'NOOP'))
         rows.push(week)
     }
 
-    // Prev / Next navigation
     let prevYear = year, prevMonth = month - 1
     if (prevMonth === 0) { prevMonth = 12; prevYear-- }
     let nextYear = year, nextMonth = month + 1
@@ -275,13 +274,9 @@ function buildJournalButtons(entries, actionPrefix, backAction = 'JOURNAL_MENU')
     return Markup.inlineKeyboard(rows)
 }
 
-
-
 function buildStatsText(userId) {
     const habits = habitRepo.getUserHabits(userId)
     const metrics = metricRepo.getUserMetrics(userId)
-
-
 
     if (habits.length === 0 && metrics.length === 0) {
         return '📊 No data yet. Start by adding habits or metrics!'
@@ -310,8 +305,6 @@ function buildStatsText(userId) {
 
     return text
 }
-
-
 
 function buildJournalLogText(entries, page, totalPages) {
     if (entries.length === 0) return '📓 No journal entries yet.'
@@ -373,10 +366,11 @@ bot.command('track', (ctx) => {
     if (!habitName) return ctx.reply('Usage: /track <habit name>')
 
     const user = userRepo.findByTelegramId(ctx.from.id)
+    const tz = user?.timezone || 'UTC'
     const habit = habitRepo.findHabitByName(user.id, habitName)
     if (!habit) return ctx.reply('Habit not found ❌')
 
-    habitEntryRepo.trackHabit(habit.id, getToday(), 1)
+    habitEntryRepo.trackHabit(habit.id, getToday(tz), 1)
     ctx.reply(`Tracked *${habitName}* for today ✅`, { parse_mode: 'Markdown', ...backToMainKeyboard })
 })
 
@@ -387,11 +381,12 @@ bot.command('stats', (ctx) => {
 
 bot.command('journal', (ctx) => {
     const user = userRepo.findByTelegramId(ctx.from.id)
+    const tz = user?.timezone || 'UTC'
     const input = ctx.message.text.split(' ').slice(1).join(' ')
     if (!input.includes('|')) return ctx.reply('Usage: /journal <note> | <best moment>')
 
     const [note, bestMoment] = input.split('|').map(s => s.trim())
-    journalRepo.upsertJournalEntry(user.id, getToday(), note, bestMoment)
+    journalRepo.upsertJournalEntry(user.id, getToday(tz), note, bestMoment)
     ctx.reply('Journal saved 📓', backToMainKeyboard)
 })
 
@@ -411,10 +406,11 @@ bot.command('logmetric', (ctx) => {
 
     const [name, value] = parts
     const user = userRepo.findByTelegramId(ctx.from.id)
+    const tz = user?.timezone || 'UTC'
     const metric = metricRepo.findMetricByName(user.id, name)
     if (!metric) return ctx.reply('Metric not found ❌')
 
-    metricEntryRepo.logMetric(metric.id, getToday(), parseFloat(value))
+    metricEntryRepo.logMetric(metric.id, getToday(tz), parseFloat(value))
     ctx.reply(`Logged *${value} ${metric.unit}* for ${name} ✅`, { parse_mode: 'Markdown', ...backToMainKeyboard })
 })
 
@@ -439,9 +435,23 @@ bot.action('SHOW_STATS', (ctx) => {
     }, 'SHOW_STATS')
 })
 
-// ─── No Operation ────────────────────────────────────────────────────────────────
+// ─── No Operation ─────────────────────────────────────────────────────────────
 
 bot.action('NOOP', (ctx) => ctx.answerCbQuery())
+
+// ─── Timezone ─────────────────────────────────────────────────────────────────
+
+bot.action('SET_TIMEZONE', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const current = user?.timezone || 'UTC'
+        getSession(ctx.from.id).step = 'AWAITING_TIMEZONE'
+        ctx.editMessageText(
+            `🌍 Current timezone: *${current}*\n\nSend your timezone (e.g. *Asia/Jerusalem*, *Europe/London*, *America/New_York*):`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'MAIN_MENU')]]) }
+        )
+    }, 'SET_TIMEZONE')
+})
 
 // ─── Habits Menu ──────────────────────────────────────────────────────────────
 
@@ -451,7 +461,6 @@ bot.action('HABITS_MENU', (ctx) => {
         ctx.editMessageText('💪 Habits — what would you like to do?', buildHabitsMenuKeyboard(user.id))
     }, 'HABITS_MENU')
 })
-
 
 bot.action('ADD_HABIT', (ctx) => {
     safe(ctx, () => {
@@ -482,7 +491,8 @@ bot.action('TRACK_HABIT', (ctx) => {
 bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, habitId, habitName] = ctx.match
-        const today = getToday()
+        const tz = getUserTimezone(ctx.from.id)
+        const today = getToday(tz)
         const existing = habitEntryRepo.getHabitEntrieDate(parseInt(habitId), today)
 
         if (existing) {
@@ -504,9 +514,9 @@ bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
             {
                 parse_mode: 'Markdown', ...Markup.inlineKeyboard([
                     [
-                        Markup.button.callback('✅ Done', `SET_HABIT:${habitId}:${habitName}:1:${getToday()}`),
-                        Markup.button.callback('❌ Not Done', `SET_HABIT:${habitId}:${habitName}:0:${getToday()}`),
-                        Markup.button.callback('📅 Yesterday', `SET_HABIT:${habitId}:${habitName}:1:${getYesterday()}`)
+                        Markup.button.callback('✅ Done', `SET_HABIT:${habitId}:${habitName}:1:${today}`),
+                        Markup.button.callback('❌ Not Done', `SET_HABIT:${habitId}:${habitName}:0:${today}`),
+                        Markup.button.callback('📅 Yesterday', `SET_HABIT:${habitId}:${habitName}:1:${getYesterday(tz)}`)
                     ],
                     [Markup.button.callback('🔙 Back', 'TRACK_HABIT')],
                 ])
@@ -515,12 +525,12 @@ bot.action(/^DO_TRACK:(\d+):(.+)$/, (ctx) => {
     }, 'DO_TRACK')
 })
 
-
 bot.action(/^SET_HABIT:(\d+):(.+):(\d):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, habitId, habitName, completed, date] = ctx.match
+        const tz = getUserTimezone(ctx.from.id)
         const isDone = completed === '1'
-        const label = date === getToday() ? 'today' : 'yesterday'
+        const label = date === getToday(tz) ? 'today' : 'yesterday'
 
         habitEntryRepo.trackHabit(parseInt(habitId), date, isDone ? 1 : 0)
         const entries = habitEntryRepo.getHabitEntries(parseInt(habitId))
@@ -550,12 +560,9 @@ bot.action(/^UNDO_TRACK_HABIT:(\d+):(.+)$/, (ctx) => {
         const [, habitId, date] = ctx.match
         habitEntryRepo.deleteHabitEntry(parseInt(habitId), date)
         const user = userRepo.findByTelegramId(ctx.from.id)
-
         ctx.editMessageText(`Habit untracked.`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(user.id) })
-
     }, 'UNDO_TRACK_HABIT')
 })
-
 
 bot.action('RENAME_HABIT', (ctx) => {
     safe(ctx, () => {
@@ -634,7 +641,8 @@ bot.action('JOURNAL_MENU', (ctx) => {
 bot.action('WRITE_JOURNAL', (ctx) => {
     safe(ctx, () => {
         const user = userRepo.findByTelegramId(ctx.from.id)
-        const today = getToday()
+        const tz = user?.timezone || 'UTC'
+        const today = getToday(tz)
         const existing = journalRepo.getJournalByDate(user.id, today)
 
         if (existing) {
@@ -662,12 +670,14 @@ bot.action('JOURNAL_SKIP_BEST_MOMENT', (ctx) => {
     safe(ctx, () => {
         const session = getSession(ctx.from.id)
         const user = userRepo.findByTelegramId(ctx.from.id)
-        const journalDate = session.data.selectedDate || getToday()
+        const tz = user?.timezone || 'UTC'
+        const journalDate = session.data.selectedDate || getToday(tz)
         journalRepo.upsertJournalEntry(user.id, journalDate, session.data.note, null)
         clearSession(ctx.from.id)
         ctx.editMessageText('Journal saved 📓', buildJournalMenuKeyboard(user.id))
     }, 'JOURNAL_SKIP_BEST_MOMENT')
 })
+
 bot.action(/^VIEW_JOURNAL:(\d+)$/, (ctx) => {
     safe(ctx, () => {
         const page = parseInt(ctx.match[1])
@@ -687,10 +697,7 @@ bot.action(/^VIEW_JOURNAL:(\d+)$/, (ctx) => {
         if (navButtons.length > 0) rows.push(navButtons)
         rows.push([Markup.button.callback('🔙 Journal Menu', 'JOURNAL_MENU')])
 
-        ctx.editMessageText(text, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(rows)
-        })
+        ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) })
     }, 'VIEW_JOURNAL')
 })
 
@@ -769,7 +776,8 @@ bot.action('LOG_METRIC', (ctx) => {
 bot.action(/^SELECT_LOG_METRIC:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, metricId, metricName] = ctx.match
-        const today = getToday()
+        const tz = getUserTimezone(ctx.from.id)
+        const today = getToday(tz)
         const session = getSession(ctx.from.id)
 
         session.step = 'AWAITING_METRIC_VALUE'
@@ -910,7 +918,6 @@ bot.action('METRIC_HISTORY', (ctx) => {
     }, 'METRIC_HISTORY')
 })
 
-
 bot.action(/^SHOW_METRIC_HISTORY:(\d+):(.+)$/, (ctx) => {
     safe(ctx, () => {
         const [, metricId, metricName] = ctx.match
@@ -920,9 +927,7 @@ bot.action(/^SHOW_METRIC_HISTORY:(\d+):(.+)$/, (ctx) => {
 
         ctx.editMessageText(text, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('🔙 Back', 'METRICS_MENU')]
-            ])
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back', 'METRICS_MENU')]])
         })
     }, 'SHOW_METRIC_HISTORY')
 })
@@ -932,10 +937,11 @@ bot.action(/^SHOW_METRIC_HISTORY:(\d+):(.+)$/, (ctx) => {
 bot.action('CALENDAR_TODAY', (ctx) => {
     safe(ctx, () => {
         const user = userRepo.findByTelegramId(ctx.from.id)
+        const tz = user?.timezone || 'UTC'
         const now = new Date()
         ctx.editMessageText(
             '📅 Calendar — tap a day to view or edit',
-            buildCalendarKeyboard(user.id, now.getFullYear(), now.getMonth() + 1)
+            buildCalendarKeyboard(user.id, now.getFullYear(), now.getMonth() + 1, tz)
         )
     }, 'CALENDAR_TODAY')
 })
@@ -943,11 +949,12 @@ bot.action('CALENDAR_TODAY', (ctx) => {
 bot.action(/^CALENDAR:(\d{4})-(\d{2})$/, (ctx) => {
     safe(ctx, () => {
         const user = userRepo.findByTelegramId(ctx.from.id)
+        const tz = user?.timezone || 'UTC'
         const year = parseInt(ctx.match[1])
         const month = parseInt(ctx.match[2])
         ctx.editMessageText(
             '📅 Calendar — tap a day to view or edit',
-            buildCalendarKeyboard(user.id, year, month)
+            buildCalendarKeyboard(user.id, year, month, tz)
         )
     }, 'CALENDAR')
 })
@@ -959,7 +966,6 @@ bot.action(/^CAL_DAY:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
         const habits = habitRepo.getUserHabits(user.id)
         const metrics = metricRepo.getUserMetrics(user.id)
 
-        // Build summary text
         let text = `📅 *${dateStr}*\n\n`
 
         if (habits.length > 0) {
@@ -991,7 +997,6 @@ bot.action(/^CAL_DAY:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
             text += `· No entry\n`
         }
 
-        // Parse YYYY-MM from dateStr for back button
         const [y, m] = dateStr.split('-')
 
         const rows = [
@@ -1039,14 +1044,12 @@ bot.action(/^CAL_SET_HABIT:(\d+):(\d{4}-\d{2}-\d{2})$/, (ctx) => {
         const existing = habitEntryRepo.getHabitEntrieDate(parseInt(habitId), dateStr)
 
         if (existing) {
-            // Toggle: flip completed status
             const newStatus = existing.completed === 1 ? 0 : 1
             habitEntryRepo.trackHabit(parseInt(habitId), dateStr, newStatus)
         } else {
             habitEntryRepo.trackHabit(parseInt(habitId), dateStr, 1)
         }
 
-        // Re-render habits list for that date
         const user = userRepo.findByTelegramId(ctx.from.id)
         const habits = habitRepo.getUserHabits(user.id)
         const rows = habits.map(h => {
@@ -1107,7 +1110,6 @@ bot.action(/^CAL_SEL_MET:(\d+):(.+):(\d{4}-\d{2}-\d{2})$/, (ctx) => {
             )
         }
 
-        // Store date in session and reuse AWAITING_METRIC_VALUE
         const session = getSession(ctx.from.id)
         session.step = 'AWAITING_METRIC_VALUE'
         session.data.metricId = parseInt(metricId)
@@ -1153,7 +1155,6 @@ bot.action(/^CAL_EDIT_JOURNAL:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
             )
         }
 
-        // Reuse journal flow but store selected date
         const session = getSession(ctx.from.id)
         session.step = 'AWAITING_JOURNAL_NOTE'
         session.data.selectedDate = dateStr
@@ -1177,6 +1178,37 @@ bot.action(/^CAL_DEL_JOURNAL:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
     }, 'CAL_DEL_JOURNAL')
 })
 
+// ─── Export ──────────────────────────────────────────────────
+
+bot.action('EXPORT_DATA', (ctx) => {
+    safe(ctx, async () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+
+        const habitEntries = habitEntryRepo.exportUserHabitEntries(user.id)
+        const metricEntries = metricEntryRepo.exportUserMetricEntries(user.id)
+        const journalEntries = journalRepo.getAllJournalEntries(user.id)
+
+        const habitsCSV = ['date,habit,completed',
+            ...habitEntries.map(e => `${e.entry_date},${e.name},${e.completed === 1 ? 'yes' : 'no'}`)
+        ].join('\n')
+
+        const metricsCSV = ['date,metric,unit,value',
+            ...metricEntries.map(e => `${e.entry_date},${e.name},${e.unit},${e.value}`)
+        ].join('\n')
+
+        const journalCSV = ['date,note,best_moment',
+            ...journalEntries.map(e => `${e.entry_date},"${(e.note || '').replace(/"/g, '""')}","${(e.best_moment || '').replace(/"/g, '""')}"`)
+        ].join('\n')
+
+        await ctx.replyWithDocument({ source: Buffer.from(habitsCSV, 'utf-8'), filename: 'habits.csv' })
+        await ctx.replyWithDocument({ source: Buffer.from(metricsCSV, 'utf-8'), filename: 'metrics.csv' })
+        await ctx.replyWithDocument({ source: Buffer.from(journalCSV, 'utf-8'), filename: 'journal.csv' })
+
+        ctx.answerCbQuery('✅ Export done!')
+
+    }, 'EXPORT_DATA')
+})
+
 // ─── Reminders Menu ───────────────────────────────────────────────────────────
 
 bot.action('REMINDERS_MENU', (ctx) => {
@@ -1185,8 +1217,7 @@ bot.action('REMINDERS_MENU', (ctx) => {
     }, 'REMINDERS_MENU')
 })
 
-
-// ─── Habit reminders ───────────────────────────────────────────────────────────
+// ─── Habit Reminders ──────────────────────────────────────────────────────────
 
 bot.action('HABIT_REMINDERS', (ctx) => {
     safe(ctx, () => {
@@ -1266,7 +1297,7 @@ bot.action(/^REMOVE_HABIT_REMINDER:(\d+):(.+)$/, (ctx) => {
     }, 'REMOVE_HABIT_REMINDER')
 })
 
-// ─── Metric reminders ───────────────────────────────────────────────────────────
+// ─── Metric Reminders ─────────────────────────────────────────────────────────
 
 bot.action('METRIC_REMINDERS', (ctx) => {
     safe(ctx, () => {
@@ -1286,7 +1317,7 @@ bot.action('METRIC_REMINDERS', (ctx) => {
         })
         rows.push([Markup.button.callback('🔙 Back', 'REMINDERS_MENU')])
 
-        ctx.editMessageText('💪 Select a metric to manage its reminder:', Markup.inlineKeyboard(rows))
+        ctx.editMessageText('📈 Select a metric to manage its reminder:', Markup.inlineKeyboard(rows))
     }, 'METRIC_REMINDERS')
 })
 
@@ -1346,7 +1377,7 @@ bot.action(/^REMOVE_METRIC_REMINDER:(\d+):(.+)$/, (ctx) => {
     }, 'REMOVE_METRIC_REMINDER')
 })
 
-// ─── Journal reminders ───────────────────────────────────────────────────────────
+// ─── Journal Reminders ────────────────────────────────────────────────────────
 
 bot.action('JOURNAL_REMINDER', (ctx) => {
     safe(ctx, () => {
@@ -1379,16 +1410,13 @@ bot.action('JOURNAL_REMINDER', (ctx) => {
 
 bot.action('SET_JOURNAL_REMINDER', (ctx) => {
     safe(ctx, () => {
-        const session = getSession(ctx.from.id)
-        session.step = 'AWAITING_JOURNAL_REMINDER_TIME'
-
+        getSession(ctx.from.id).step = 'AWAITING_JOURNAL_REMINDER_TIME'
         ctx.editMessageText(
             `⏰ Send the reminder time for your journal (e.g. 21:00):`,
             { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Cancel', 'JOURNAL_REMINDER')]]) }
         )
     }, 'SET_JOURNAL_REMINDER')
 })
-
 
 bot.action('REMOVE_JOURNAL_REMINDER', (ctx) => {
     safe(ctx, () => {
@@ -1401,14 +1429,15 @@ bot.action('REMOVE_JOURNAL_REMINDER', (ctx) => {
     }, 'REMOVE_JOURNAL_REMINDER')
 })
 
-// ─── Text Handler (multi-step flows) ─────────────────────────────────────────
+// ─── Text Handler (multi-step flows) ──────────────────────────────────────────
 
 bot.on(message('text'), (ctx) => {
     const session = getSession(ctx.from.id)
-    const raw = ctx.message.text
-    const text = raw.trim()
+    const text = ctx.message.text.trim()
     const user = userRepo.findByTelegramId(ctx.from.id)
     if (!user) return
+
+    const tz = user?.timezone || 'UTC'
 
     const nameSteps = ['AWAITING_HABIT_NAME', 'AWAITING_HABIT_RENAME', 'AWAITING_METRIC_NAME', 'AWAITING_METRIC_UNIT', 'AWAITING_METRIC_RENAME']
 
@@ -1421,6 +1450,19 @@ bot.on(message('text'), (ctx) => {
     }
 
     switch (session.step) {
+
+        case 'AWAITING_TIMEZONE': {
+            try {
+                // Validate by trying to use the timezone — Node throws RangeError if invalid
+                new Date().toLocaleDateString('en-CA', { timeZone: text })
+                userRepo.setTimezone(user.id, text)
+                clearSession(ctx.from.id)
+                ctx.reply(`🌍 Timezone set to *${text}* ✅`, { parse_mode: 'Markdown', ...backToMainKeyboard })
+            } catch (e) {
+                ctx.reply('⚠️ Invalid timezone. Try something like *Asia/Jerusalem* or *America/New_York*', { parse_mode: 'Markdown' })
+            }
+            break
+        }
 
         case 'AWAITING_HABIT_NAME': {
             if (habitRepo.findHabitByName(user.id, finalText)) {
@@ -1454,7 +1496,7 @@ bot.on(message('text'), (ctx) => {
         }
 
         case 'AWAITING_JOURNAL_BEST_MOMENT': {
-            const journalDate = session.data.selectedDate || getToday()
+            const journalDate = session.data.selectedDate || getToday(tz)
             journalRepo.upsertJournalEntry(user.id, journalDate, session.data.note, text)
             clearSession(ctx.from.id)
             ctx.reply('Journal saved 📓', buildJournalMenuKeyboard(user.id))
@@ -1488,7 +1530,7 @@ bot.on(message('text'), (ctx) => {
 
             const metricIdForUndo = session.data.metricId
             const loggedMetricName = session.data.metricName
-            const logDate = session.data.selectedDate || getToday()  // ← change
+            const logDate = session.data.selectedDate || getToday(tz)
             const metric = metricRepo.findMetricById(metricIdForUndo)
             metricEntryRepo.logMetric(metricIdForUndo, logDate, value)
             clearSession(ctx.from.id)
@@ -1519,41 +1561,29 @@ bot.on(message('text'), (ctx) => {
         case 'AWAITING_HABIT_REMINDER_TIME': {
             const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
             if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
-
             habitRepo.setHabitReminder(session.data.habitId, text)
             const habitName = session.data.habitName
             clearSession(ctx.from.id)
-            ctx.reply(
-                `⏰ Reminder set for *${habitName}* at *${text}* ✅`,
-                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
-            )
+            ctx.reply(`⏰ Reminder set for *${habitName}* at *${text}* ✅`, { parse_mode: 'Markdown', ...remindersMenuKeyboard })
             break
         }
 
         case 'AWAITING_METRIC_REMINDER_TIME': {
             const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
             if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
-
             metricRepo.setMetricReminder(session.data.metricId, text)
             const metricName = session.data.metricName
             clearSession(ctx.from.id)
-            ctx.reply(
-                `⏰ Reminder set for *${metricName}* at *${text}* ✅`,
-                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
-            )
+            ctx.reply(`⏰ Reminder set for *${metricName}* at *${text}* ✅`, { parse_mode: 'Markdown', ...remindersMenuKeyboard })
             break
         }
 
         case 'AWAITING_JOURNAL_REMINDER_TIME': {
             const isValidTime = /^([01]\d|2[0-3]):([0-5]\d)$/.test(text)
             if (!isValidTime) return ctx.reply('⚠️ Please send time in HH:MM format (e.g. 09:00)')
-
             userRepo.setJournalReminder(user.id, text)
             clearSession(ctx.from.id)
-            ctx.reply(
-                `⏰ Journal reminder set for *${text}* ✅`,
-                { parse_mode: 'Markdown', ...remindersMenuKeyboard }
-            )
+            ctx.reply(`⏰ Journal reminder set for *${text}* ✅`, { parse_mode: 'Markdown', ...remindersMenuKeyboard })
             break
         }
 
@@ -1564,25 +1594,28 @@ bot.on(message('text'), (ctx) => {
     }
 })
 
-// ─── Schedule ───────────────────────────────────────────────────────────────────
+// ─── Schedule ─────────────────────────────────────────────────────────────────
 
 cron.schedule('5 0 * * *', () => {
-    const yesterday = getYesterday()
-    const habits = habitRepo.getAllHabits()
-    for (const habit of habits) {
-        try {
-            if (habit.created_at <= yesterday && !habitEntryRepo.getHabitEntrieDate(habit.id, yesterday)) {
-                habitEntryRepo.trackHabit(habit.id, yesterday, 0)
+    const users = userRepo.getAllUsers()
+    for (const user of users) {
+        const tz = user.timezone || 'UTC'
+        const yesterday = getYesterday(tz)
+        const habits = habitRepo.getUserHabits(user.id)
+        for (const habit of habits) {
+            try {
+                if (habit.created_at <= yesterday && !habitEntryRepo.getHabitEntrieDate(habit.id, yesterday)) {
+                    habitEntryRepo.trackHabit(habit.id, yesterday, 0)
+                }
+            } catch (e) {
+                logError(e, `auto_mark_missed:${habit.id}`)
             }
-        } catch (e) {
-            logError(e, `auto_mark_missed:${habit.id}`)
         }
     }
 })
 
 cron.schedule('0 9 * * 0', () => {
     const users = userRepo.getAllUsers()
-
     for (const user of users) {
         try {
             const text = `📅 *Weekly Summary*\n\n` + buildStatsText(user.id)
@@ -1599,7 +1632,8 @@ cron.schedule('* * * * *', () => {
 
     for (const habit of habits) {
         const key = `habit:${habit.id}:${now}`
-        if (habit.reminder_time === now && !sentReminders.has(key) && !habitEntryRepo.getHabitEntrieDate(habit.id, getToday())) {
+        const tz = habit.timezone || 'UTC'
+        if (habit.reminder_time === now && !sentReminders.has(key) && !habitEntryRepo.getHabitEntrieDate(habit.id, getToday(tz))) {
             sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(
@@ -1620,7 +1654,8 @@ cron.schedule('* * * * *', () => {
 
     for (const metric of metrics) {
         const key = `metric:${metric.id}:${now}`
-        if (metric.reminder_time === now && !sentReminders.has(key) && !metricEntryRepo.getMetricEntryDate(metric.id, getToday())) {
+        const tz = metric.timezone || 'UTC'
+        if (metric.reminder_time === now && !sentReminders.has(key) && !metricEntryRepo.getMetricEntryDate(metric.id, getToday(tz))) {
             sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(
@@ -1641,7 +1676,8 @@ cron.schedule('* * * * *', () => {
 
     for (const user of users) {
         const key = `journal:${user.id}:${now}`
-        if (user.journal_reminder_time === now && !sentReminders.has(key) && !journalRepo.getJournalByDate(user.id, getToday())) {
+        const tz = user.timezone || 'UTC'
+        if (user.journal_reminder_time === now && !sentReminders.has(key) && !journalRepo.getJournalByDate(user.id, getToday(tz))) {
             sentReminders.add(key)
             try {
                 bot.telegram.sendMessage(

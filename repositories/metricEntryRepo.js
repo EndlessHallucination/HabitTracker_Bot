@@ -61,11 +61,23 @@ function getMetricHistory(metricId, limit) {
     return stmt.all(metricId, limit)
 }
 
+
+function exportUserMetricEntries(userId) {
+    return db.prepare(`
+        SELECT me.entry_date, m.name, m.unit, me.value
+        FROM metric_entries me
+        JOIN metrics m ON m.id = me.metric_id
+        WHERE m.user_id = ?
+        ORDER BY me.entry_date DESC
+    `).all(userId)
+}
+
 module.exports = {
     logMetric,
     getMetricEntries,
     getMetricEntryDate,
     getMetricStats,
     getMetricHistory,
-    deleteMetricEntry
+    deleteMetricEntry,
+    exportUserMetricEntries
 }

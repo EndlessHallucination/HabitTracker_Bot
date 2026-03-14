@@ -5,6 +5,7 @@ db.exec(`
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_id INTEGER NOT NULL UNIQUE,
         username TEXT,
+        timezone TEXT NOT NULL DEFAULT 'UTC',
         journal_reminder_time TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

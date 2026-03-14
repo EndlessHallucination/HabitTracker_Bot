@@ -9,6 +9,17 @@ function createUser(telegramId, username) {
     stmt.run(telegramId, username)
 }
 
+
+function setTimezone(userId, timezone) {
+    db.prepare(`UPDATE users SET timezone = ? WHERE id = ?`).run(timezone, userId)
+}
+
+function getTimezone(userId) {
+    const user = db.prepare(`SELECT timezone FROM users WHERE id = ?`).get(userId)
+    return user?.timezone || 'UTC'
+}
+
+
 function getAllUsers() {
     const stmt = db.prepare(`
         SELECT * FROM users
@@ -57,5 +68,7 @@ module.exports = {
     getAllUsers,
     setJournalReminder,
     removeJournalReminder,
-    getUsersWithJournalReminder
+    getUsersWithJournalReminder,
+    getTimezone,
+    setTimezone,
 }
