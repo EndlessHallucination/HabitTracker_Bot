@@ -4,7 +4,7 @@ require('./schema.js')
 const { Telegraf, Markup } = require('telegraf')
 const { message } = require('telegraf/filters')
 
-const { calcStreak, safe, logError } = require('./utils.js')
+const { calcStreak, safe, logError, getToday, getYesterday, buildHeatmapText } = require('./utils.js')
 
 const cron = require('node-cron')
 
