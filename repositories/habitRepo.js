@@ -83,6 +83,14 @@ function findHabitById(habitId) {
     return stmt.get(habitId)
 }
 
+
+function freezeHabit(habitId) {
+    db.prepare(`UPDATE habits SET is_frozen = 1 WHERE id = ?`).run(habitId)
+}
+
+function unfreezeHabit(habitId) {
+    db.prepare(`UPDATE habits SET is_frozen = 0 WHERE id = ?`).run(habitId)
+}
 module.exports = {
     createHabit,
     deleteHabit,
@@ -93,5 +101,6 @@ module.exports = {
     findHabitById,
     setHabitReminder,
     removeHabitReminder,
-    getHabitsWithReminders
+    getHabitsWithReminders,
+    freezeHabit, unfreezeHabit
 }

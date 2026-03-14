@@ -47,10 +47,20 @@ function exportUserHabitEntries(userId) {
     `).all(userId)
 }
 
+function getHabitEntriesRange(habitId, fromDate, toDate) {
+    return db.prepare(`
+        SELECT entry_date, completed
+        FROM habit_entries
+        WHERE habit_id = ? AND entry_date BETWEEN ? AND ?
+        ORDER BY entry_date ASC
+    `).all(habitId, fromDate, toDate)
+}
+
 module.exports = {
     trackHabit,
     deleteHabitEntry,
     getHabitEntries,
     getHabitEntrieDate,
-    exportUserHabitEntries
+    exportUserHabitEntries,
+    getHabitEntriesRange
 }

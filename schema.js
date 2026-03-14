@@ -14,6 +14,7 @@ db.exec(`
         user_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
+        is_frozen INTEGER NOT NULL DEFAULT 0,
         reminder_time TEXT DEFAULT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

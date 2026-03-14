@@ -98,9 +98,13 @@ function buildHabitsMenuKeyboard(userId) {
         [Markup.button.callback('➕ Add Habit', 'ADD_HABIT')],
     ]
     if (hasHabits) {
-        rows.push([Markup.button.callback('✅ Track Habit', 'TRACK_HABIT')])
-        rows.push([Markup.button.callback('✏️ Rename Habit', 'RENAME_HABIT')])
-        rows.push([Markup.button.callback('🗑 Delete Habit', 'DELETE_HABIT')])
+        if (hasHabits) {
+            rows.push([Markup.button.callback('✅ Track Habit', 'TRACK_HABIT')])
+            rows.push([Markup.button.callback('✏️ Rename Habit', 'RENAME_HABIT')])
+            rows.push([Markup.button.callback('❄️ Freeze Habit', 'FREEZE_HABIT')])
+            rows.push([Markup.button.callback('📊 Habit Heatmap', 'HABIT_HEATMAP')])
+            rows.push([Markup.button.callback('🗑 Delete Habit', 'DELETE_HABIT')])
+        }
     }
     rows.push([Markup.button.callback('🔙 Main Menu', 'MAIN_MENU')])
     return Markup.inlineKeyboard(rows)
@@ -147,15 +151,7 @@ const remindersMenuKeyboard = Markup.inlineKeyboard([
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // en-CA locale gives YYYY-MM-DD format natively
-function getToday(timezone = 'UTC') {
-    return new Date().toLocaleDateString('en-CA', { timeZone: timezone })
-}
 
-function getYesterday(timezone = 'UTC') {
-    const d = new Date()
-    d.setDate(d.getDate() - 1)
-    return d.toLocaleDateString('en-CA', { timeZone: timezone })
-}
 
 // Convenience: get timezone for a telegram user, falls back to UTC
 function getUserTimezone(telegramId) {
@@ -1178,6 +1174,73 @@ bot.action(/^CAL_DEL_JOURNAL:(\d{4}-\d{2}-\d{2})$/, (ctx) => {
     }, 'CAL_DEL_JOURNAL')
 })
 
+// ─── Freeze Streaks ──────────────────────────────────────────────────
+
+bot.action('FREEZE_HABIT', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+        const rows = habits.map(h => {
+            const label = h.is_frozen ? `❄️ ${h.name} (frozen)` : h.name
+            return [Markup.button.callback(label, `TOGGLE_FREEZE:${h.id}:${h.name}`)]
+        })
+        rows.push([Markup.button.callback('🔙 Back', 'HABITS_MENU')])
+        ctx.editMessageText('❄️ Tap a habit to freeze/unfreeze:', Markup.inlineKeyboard(rows))
+    }, 'FREEZE_HABIT')
+})
+
+bot.action(/^TOGGLE_FREEZE:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, habitName] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+
+        const habit = habitRepo.findHabitById(parseInt(habitId))
+        if (habit.is_frozen) {
+            habitRepo.unfreezeHabit(parseInt(habitId))
+            ctx.editMessageText(`▶️ *${habitName}* unfrozen.`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(ctx.from.id) })
+        } else {
+            habitRepo.freezeHabit(parseInt(habitId))
+            ctx.editMessageText(`❄️ *${habitName}* frozen — streak protected.`, { parse_mode: 'Markdown', ...buildHabitsMenuKeyboard(ctx.from.id) })
+        }
+    }, 'TOGGLE_FREEZE')
+})
+
+// ─── Heatmap ──────────────────────────────────────────────────
+
+bot.action('HABIT_HEATMAP', (ctx) => {
+    safe(ctx, () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const habits = habitRepo.getUserHabits(user.id)
+        ctx.editMessageText('📊 Which habit?', buildHabitButtons(habits, 'SHOW_HEATMAP', 'HABITS_MENU'))
+    }, 'HABIT_HEATMAP')
+})
+
+bot.action(/^SHOW_HEATMAP:(\d+):(.+)$/, (ctx) => {
+    safe(ctx, () => {
+        const [, habitId, habitName] = ctx.match
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        const tz = user?.timezone || 'UTC'
+        const today = getToday(tz)
+        const fromDate = (() => {
+            const d = new Date()
+            d.setDate(d.getDate() - 27)
+            return d.toLocaleDateString('en-CA', { timeZone: tz })
+        })()
+
+        const habit = habitRepo.findHabitById(parseInt(habitId))
+        const rangeEntries = habitEntryRepo.getHabitEntriesRange(parseInt(habitId), fromDate, today)
+        const allEntries = habitEntryRepo.getHabitEntries(parseInt(habitId))
+        const text = buildHeatmapText(habit, rangeEntries, allEntries, tz)
+
+        ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 Back', 'HABIT_HEATMAP')]
+            ])
+        })
+    }, 'SHOW_HEATMAP')
+})
+
 // ─── Export ──────────────────────────────────────────────────
 
 bot.action('EXPORT_DATA', (ctx) => {
@@ -1604,6 +1667,7 @@ cron.schedule('5 0 * * *', () => {
         const habits = habitRepo.getUserHabits(user.id)
         for (const habit of habits) {
             try {
+                if (habit.is_frozen) continue
                 if (habit.created_at <= yesterday && !habitEntryRepo.getHabitEntrieDate(habit.id, yesterday)) {
                     habitEntryRepo.trackHabit(habit.id, yesterday, 0)
                 }
