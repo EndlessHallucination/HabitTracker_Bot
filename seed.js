@@ -10,7 +10,7 @@ const metricEntryRepo = require('./repositories/metricEntryRepo.js')
 const journalRepo = require('./repositories/journalRepo.js')
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const TELEGRAM_ID = 199040819  // ← replace with your actual Telegram ID
+const TELEGRAM_ID = process.env.TELEGRAM_ID  
 const DAYS = 28
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
