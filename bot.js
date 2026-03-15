@@ -6,6 +6,8 @@ const { message } = require('telegraf/filters')
 
 const { calcStreak, safe, logError, getToday, getYesterday, buildHeatmapText } = require('./utils.js')
 
+const { getAIInsight } = require('./aiService.js')
+
 const cron = require('node-cron')
 
 const userRepo = require('./repositories/userRepo.js')
@@ -17,7 +19,8 @@ const metricEntryRepo = require('./repositories/metricEntryRepo.js')
 
 // ─── Env Validation ───────────────────────────────────────────────────────────
 
-const REQUIRED_ENV = ['BOT_TOKEN']
+const REQUIRED_ENV = ['BOT_TOKEN', 'GROQ_API_KEY']
+
 for (const key of REQUIRED_ENV) {
     if (!process.env[key]) {
         console.error(`❌ Missing required env variable: ${key}`)
@@ -83,7 +86,7 @@ const mainMenuKeyboard = Markup.inlineKeyboard([
     [Markup.button.callback('⏰ Reminders', 'REMINDERS_MENU')],
     [Markup.button.callback('🌍 Set Timezone', 'SET_TIMEZONE')],
     [Markup.button.callback('📤 Export Data', 'EXPORT_DATA')],
-
+    [Markup.button.callback('🤖 AI Insight', 'AI_INSIGHT')],
 ])
 
 const backToMainKeyboard = Markup.inlineKeyboard([
@@ -1272,6 +1275,18 @@ bot.action('EXPORT_DATA', (ctx) => {
     }, 'EXPORT_DATA')
 })
 
+// ─── AI Insight ──────────────────────────────────────────────────
+
+
+bot.action('AI_INSIGHT', (ctx) => {
+    safe(ctx, async () => {
+        const user = userRepo.findByTelegramId(ctx.from.id)
+        await ctx.editMessageText('🤖 Analyzing your data...')
+        const insight = await getAIInsight(user.id)
+        ctx.reply(`🤖 AI Insight:\n\n${insight}`, backToMainKeyboard)
+    }, 'AI_INSIGHT')
+})
+
 // ─── Reminders Menu ───────────────────────────────────────────────────────────
 
 bot.action('REMINDERS_MENU', (ctx) => {
@@ -1684,6 +1699,10 @@ cron.schedule('0 9 * * 0', () => {
         try {
             const text = `📅 *Weekly Summary*\n\n` + buildStatsText(user.id)
             bot.telegram.sendMessage(user.telegram_id, text, { parse_mode: 'Markdown' })
+            // AI insight after summary
+            getAIInsight(user.id).then(insight => {
+                bot.telegram.sendMessage(user.telegram_id, `🤖 *AI Insight:*\n\n${insight}`, { parse_mode: 'Markdown' })
+            }).catch(e => logError(e, `ai_insight:${user.telegram_id}`))
         } catch (e) {
             logError(e, `weekly_summary:${user.telegram_id}`)
         }
